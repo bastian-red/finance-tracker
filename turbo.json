@@ -58,7 +58,14 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
     },
+    // `^build` even though every dev server watches its own sources: the API and
+    // the web app import the workspace packages through their package.json
+    // `main`, which points at `dist/`. On a machine that has built once that file
+    // is there and `pnpm dev` works; on a fresh clone the API dies on its first
+    // import and the only symptom is that nothing ever listens on :4000.
+    // scripts/dev-smoke.sh reported exactly that, as a 60-second timeout.
     "dev": {
+      "dependsOn": ["^build"],
       "cache": false,
       "persistent": true
     },

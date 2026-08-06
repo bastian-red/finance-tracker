@@ -200,26 +200,61 @@ export interface ProbeResult {
 }
 
 /**
+ * How many times a probe that looks slow is re-measured before it is believed.
+ *
+ * Wall clock is not a property of the regex, it is a property of the regex *and*
+ * the machine. A shared CI runner preempted this process between two
+ * `hrtime` reads and charged a 16-character probe of `mercadona|carrefour|lidl`
+ * with 5.36ms, over a 5ms budget that the same pattern clears in 0.013ms on an
+ * idle box. In the suite that was a flaky test; in production it is an API
+ * refusing a legitimate rule with "that pattern backtracks" because the host was
+ * busy, intermittently, unreproducibly, in front of a user.
+ *
+ * Backtracking is not intermittent. A pattern that is slow because it explores an
+ * exponential search space is slow on every run, so the honest statistic is the
+ * **minimum** of a few measurements rather than a single sample: noise can only
+ * ever make a run slower, never faster.
+ */
+const CONFIRMATIONS = 3;
+
+/** One probe, timed. */
+function measure(compiled: RegExp, input: string): number {
+  const started = process.hrtime.bigint();
+  compiled.test(input);
+  return Number(process.hrtime.bigint() - started) / 1e6;
+}
+
+/**
  * Walk the ladder and return the first probe that blows the budget, or null.
  *
- * Returns on the first breach rather than finishing the ladder, which is what
- * bounds the cost: there is nothing more to learn once a pattern has exceeded
- * the budget, and continuing would run the same pattern against inputs 16 and 256
- * times larger.
+ * Returns on the first confirmed breach rather than finishing the ladder, which
+ * is what bounds the cost: there is nothing more to learn once a pattern has
+ * exceeded the budget, and continuing would run the same pattern against inputs
+ * 16 and 256 times larger.
+ *
+ * The re-measurement is on the slow path only. An ordinary pattern clears the
+ * budget on its first run and is never measured again, so the common case costs
+ * exactly what it did before; only a probe that looks slow pays for
+ * `CONFIRMATIONS` runs, and a genuinely catastrophic one is over budget on all of
+ * them.
  *
  * Exported for the test that pins the separation between an ordinary pattern and
- * a catastrophic one. Nothing else should call it: the number is wall clock, so
- * measuring twice gives two different answers.
+ * a catastrophic one. Nothing else should call it.
  */
 export function slowestProbe(compiled: RegExp, source: string): ProbeResult | null {
   const alphabet = probeAlphabet(source);
   for (const length of PROBE_LENGTHS) {
     for (const character of alphabet) {
       const input = character.repeat(length) + POISON;
-      const started = process.hrtime.bigint();
-      compiled.test(input);
-      const milliseconds = Number(process.hrtime.bigint() - started) / 1e6;
-      if (milliseconds > PROBE_BUDGET_MS) return { length, milliseconds };
+      let slowest = measure(compiled, input);
+      if (slowest <= PROBE_BUDGET_MS) continue;
+
+      // Over budget once. Re-measure and keep the fastest run: a scheduler
+      // hiccup does not repeat, and catastrophic backtracking does.
+      for (let attempt = 1; attempt < CONFIRMATIONS && slowest > PROBE_BUDGET_MS; attempt += 1) {
+        slowest = Math.min(slowest, measure(compiled, input));
+      }
+      if (slowest > PROBE_BUDGET_MS) return { length, milliseconds: slowest };
     }
   }
   return null;

@@ -218,7 +218,11 @@ jobs:
           . ./.env
           set +a
           pnpm db:generate && pnpm db:deploy && pnpm db:seed
-      - run: ./scripts/dev-smoke.sh
+      # WAIT_SECONDS is the script's own timeout knob, not application
+      # configuration, so it does not breach the no-env rule above: a cold runner
+      # compiles both a Nest build and a Next dev server from nothing, and 60s is
+      # a local number.
+      - run: WAIT_SECONDS=180 ./scripts/dev-smoke.sh
 
   e2e:
     name: E2E (Playwright)

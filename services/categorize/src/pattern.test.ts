@@ -132,6 +132,40 @@ describe('the probe ladder', () => {
     expect(slowestProbe(warm(source), source)).toBeNull();
   });
 
+  it('a single slow reading is not enough to reject a pattern', () => {
+    // The failure this pins, and it was a CI failure before it was a test: a
+    // shared runner preempted the process between two `hrtime` reads and charged
+    // a 16-character probe of an ordinary alternation with 5.36ms, over a budget
+    // it clears in 0.013ms on an idle machine. In the suite that is a flake. In
+    // production it is an API telling somebody their rule backtracks because the
+    // host was busy, once, unreproducibly.
+    //
+    // A regex whose first `test` is slow and whose later ones are not is exactly
+    // what noise looks like and exactly what backtracking does not, so the
+    // measurement keeps the fastest run rather than the first.
+    const ordinary = warm('mercadona|carrefour|lidl');
+    let call = 0;
+    const flaky = {
+      ...ordinary,
+      source: ordinary.source,
+      test(input: string) {
+        call += 1;
+        // One long pause, on the first probe only.
+        if (call === 1) {
+          const until = process.hrtime.bigint() + BigInt(8_000_000);
+          while (process.hrtime.bigint() < until) {
+            /* burn wall clock the way a descheduled process does */
+          }
+        }
+        return ordinary.test(input);
+      },
+    } as unknown as RegExp;
+
+    expect(slowestProbe(flaky, 'mercadona|carrefour|lidl')).toBeNull();
+    // And it really did stall once, so the case is not vacuous.
+    expect(call).toBeGreaterThan(1);
+  });
+
   it.each(CATASTROPHIC)('trips a rung for %s even warm', (source) => {
     // The regression this pins. With a single fixed probe of length 22, `(a|a)*$`
     // measured 72ms in this suite and 23ms warm in isolation — under the 50ms
