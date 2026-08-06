@@ -54,27 +54,41 @@ export interface Harness {
 }
 
 /**
- * Boot the whole API in-process.
+ * Boot the whole API in-process, listening on an ephemeral port.
  *
- * `app.init()` rather than `listen()`: supertest starts an ephemeral server per
- * request, so nothing binds a fixed port and two files can never collide on one.
- * `PrismaService.onModuleInit` still runs, so an unreachable database fails here
- * with the message the process would print rather than inside the first
- * assertion.
+ * **`listen(0)`, not `init()`, and the difference is the concurrency proof.**
+ * Handed a server that is not listening, supertest starts one per request and
+ * closes it when that response ends. With eight requests in flight against the
+ * same server object -- which is exactly what `budget-overlap.integration.test.ts`
+ * fires to race the exclusion constraint -- the first response to finish closes
+ * the listener out from under the other seven, and they fail with
+ * `read ECONNRESET`. It survived locally, where the requests were fast enough to
+ * serialise, and failed on every CI run: a two-core runner overlaps them properly.
+ *
+ * Port 0 lets the kernel pick, so nothing is hardcoded and two files still cannot
+ * collide. `app.close()` closes the listener with everything else.
+ *
+ * `PrismaService.onModuleInit` runs either way, so an unreachable database still
+ * fails here with the message the process would print rather than inside the
+ * first assertion.
  */
 export async function boot(): Promise<Harness> {
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
   const app = moduleRef.createNestApplication();
-  await app.init();
+  await app.listen(0);
 
   const prisma = app.get(PrismaService);
   const redis = app.get(RedisService);
+
+  // `127.0.0.1` and not `localhost`: on a runner that resolves localhost to ::1
+  // first, a server bound to the IPv4 wildcard is not there.
+  const { port } = app.getHttpServer().address() as { port: number };
 
   return {
     app,
     prisma,
     redis,
-    http: request(app.getHttpServer()),
+    http: request(`http://127.0.0.1:${port}`),
     close: async () => {
       await app.close();
     },

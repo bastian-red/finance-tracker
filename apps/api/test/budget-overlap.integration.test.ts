@@ -114,12 +114,19 @@ describe('POST /budgets under two simultaneous writers', () => {
   it('stores exactly one of eight identical requests and refuses the rest with a 409', async () => {
     await clearBudgets();
 
-    // Eight rather than two: the race window between the first INSERT and its
+    // Sixteen rather than two: the race window between the first INSERT and its
     // COMMIT is microseconds, and one pair of requests can miss it and still
-    // pass by ordering themselves. Eight in flight makes at least one genuinely
-    // concurrent, and the assertion is the same either way -- the constraint is
-    // what decides, not the arrival order.
-    const attempts = Array.from({ length: 8 }, () =>
+    // pass by ordering themselves. Sixteen in flight makes at least one
+    // genuinely concurrent, and the assertion is the same either way -- the
+    // constraint is what decides, not the arrival order.
+    //
+    // Sixteen is also what exposed a bug in the harness rather than in the app.
+    // It used to hand supertest a server that was not listening, and supertest
+    // then starts one per request and closes it when that response ends: the
+    // first of these to finish closed the listener under the others and they
+    // came back `read ECONNRESET`. Eight was few enough to survive on a fast
+    // machine and failed on every CI runner. See `boot()` in ./harness.
+    const attempts = Array.from({ length: 16 }, () =>
       post({
         categoryId: groceries,
         limitMinor: 40_000,
@@ -133,7 +140,7 @@ describe('POST /budgets under two simultaneous writers', () => {
     const conflicted = responses.filter((response) => response.status === 409);
 
     expect(created).toHaveLength(1);
-    expect(conflicted).toHaveLength(7);
+    expect(conflicted).toHaveLength(15);
     // The database is the authority on this, not the count of 201s.
     expect(await harness.prisma.budget.count({ where: { userId: user.id } })).toBe(1);
 
