@@ -109,6 +109,19 @@ jobs:
     # rather than for a reader in another timezone.
     env:
       TZ: Pacific/Kiritimati
+      # The two explicit steps below run OUTSIDE scripts/integration.sh, so they
+      # do not get its defaults. `prisma migrate deploy` reads both names out of
+      # schema.prisma and fails validation (P1012) without them, which reads as
+      # "Environment variable not found" rather than as "this job forgot to set
+      # it". The values are .env.example's, matching the service containers.
+      #
+      # This is not the pattern dev-smoke forbids: that job exists to prove the
+      # app configures itself from the repo, and supplying anything there would
+      # make it test its own setup. This job is proving database invariants, and
+      # its connection string is a fixture like any other.
+      DATABASE_URL: postgresql://fin:fin@localhost:5436/fin?schema=public
+      DIRECT_DATABASE_URL: postgresql://fin:fin@localhost:5436/fin?schema=public
+      REDIS_URL: redis://localhost:6383
     services:
       postgres:
         image: postgres:16-alpine

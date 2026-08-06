@@ -73,6 +73,29 @@
       "dependsOn": ["^build"],
       "cache": false
     },
+
+    // The seed imports @fin/shared for its money and date helpers, and
+    // `@fin/shared`'s package.json points at `dist/index.js`. On a machine that
+    // has built once, that file is there and `tsx prisma/seed.ts` works; on a
+    // clean checkout it is not, and the failure is
+    // `Cannot find module .../@fin/shared/dist/index.js` from inside the seed --
+    // an error about module resolution, several layers from "you have not built
+    // the workspace". `dependsOn: ["^build"]` is what makes `pnpm db:seed` build
+    // what it needs first, for CI and for a reader following the README alike.
+    //
+    // Never cached: seeding writes to a database turbo cannot see, so a cache
+    // hit would skip the write and report success.
+    "seed": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+
+    // Same reasoning for the migration: `prisma migrate deploy` reads
+    // DIRECT_DATABASE_URL out of schema.prisma, and turbo is what carries it
+    // through strict env mode.
+    "migrate:deploy": {
+      "cache": false
+    },
     "test:e2e": {
       "cache": false
     }
