@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    "target": "ES2022",
+    // ES2023 for the lib, not for the target. The only thing it is here for is
+    // `Intl.NumberFormat.prototype.format(string)`, which is how money is
+    // formatted exactly (see packages/shared/src/money/money.ts). Node 20 has
+    // shipped it since v18; without the newer lib the call is a type error and
+    // the only alternatives are a float or an `any`.
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "skipLibCheck": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": false
+  }
+}

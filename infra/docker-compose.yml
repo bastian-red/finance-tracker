@@ -1,0 +1,133 @@
+# Local development infrastructure: Postgres, Redis, Mailhog (test SMTP), and
+# (behind the `app` profile) the api and web application containers.
+#
+#   docker compose -f infra/docker-compose.yml up -d
+#     -> datastores only (postgres, redis, mailhog). The documented default:
+#        a reader who wants the documented `pnpm dev` loop, not the images.
+#   docker compose -f infra/docker-compose.yml --profile app up -d --build
+#     -> datastores + api + web, built from infra/Dockerfile.api and
+#        infra/Dockerfile.web. Requires a real .env in the repo root (the api
+#        and web services load it via env_file; see below), the same file
+#        scripts/dev.sh requires.
+#
+# Ports are deliberately off the defaults. The dev host runs a system PostgreSQL
+# on 5432 and the other three portfolio stacks on 5433/5434/5435 and
+# 6380/6381/6382, so this project takes 5436/6383 and every URL in .env.example
+# matches.
+#
+# `name` is explicit on purpose. Compose otherwise derives the project name from
+# the containing directory, which is `infra` in every project of this portfolio,
+# so two stacks would share one project name and evict each other's containers
+# and volumes.
+name: fin
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: fin-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: fin
+      POSTGRES_PASSWORD: fin
+      POSTGRES_DB: fin
+    ports:
+      - '5436:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U fin -d fin']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: fin-redis
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '6383:6379'
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: fin-mailhog
+    restart: unless-stopped
+    ports:
+      - '1029:1025' # SMTP
+      - '8029:8025' # web UI at http://localhost:8029
+
+  # --- app profile -----------------------------------------------------
+  # Absent from `docker compose up -d`; only started with `--profile app`.
+  # Both services build from the repo root (`context: ..`) because the
+  # Dockerfiles COPY the whole pnpm workspace, not just infra/.
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    image: fin-api
+    container_name: fin-api
+    profiles: ['app']
+    restart: unless-stopped
+    # Loads the real .env first (AUTH_SECRET, rate limits, SMTP, money
+    # locale, ...), the same file scripts/dev.sh requires. Relative to this
+    # file's directory, per Compose's env_file resolution -- not to whatever
+    # directory `docker compose` happens to be run from.
+    env_file:
+      - ../.env
+    environment:
+      # Overrides only what changes inside the compose network: containers
+      # reach Postgres and Redis by service name, never by the `localhost`
+      # a host .env points at.
+      DATABASE_URL: postgresql://fin:fin@postgres:5432/fin?schema=public
+      DIRECT_DATABASE_URL: postgresql://fin:fin@postgres:5432/fin?schema=public
+      REDIS_URL: redis://redis:6379
+    ports:
+      - '4000:4000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # No compose-level healthcheck: infra/Dockerfile.api already declares one
+    # and the built image carries it, so redeclaring it here would be a
+    # second copy of the same probe that can drift from the first.
+
+  web:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.web
+      args:
+        # Browser-visible URL, baked into the client bundle at build time
+        # (see the Dockerfile). Defaults to the host port `api` publishes
+        # above; override on the shell (`NEXT_PUBLIC_API_BASE_URL=... docker
+        # compose --profile app up -d --build`) for a non-default mapping.
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:4000}
+    image: fin-web
+    container_name: fin-web
+    profiles: ['app']
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      # Server-to-server calls stay inside the compose network; the browser
+      # never sees this value, only NEXT_PUBLIC_API_BASE_URL above.
+      API_BASE_URL: http://api:4000
+    ports:
+      - '3000:3000'
+    depends_on:
+      api:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:

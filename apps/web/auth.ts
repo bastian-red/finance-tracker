@@ -1,0 +1,98 @@
+import { credentialsSchema, sessionUserSchema, type SessionUser } from '@fin/shared';
+import NextAuth from 'next-auth';
+import Credentials from 'next-auth/providers/credentials';
+import { ApiError, apiRequest } from './lib/api';
+import { endpoints } from './lib/endpoints';
+
+/**
+ * The session, and the one place a password is ever handled.
+ *
+ * The split of responsibility with `apps/api` is deliberate and worth stating,
+ * because it is the reason this file is short. The API owns the user table, the
+ * Argon hash and the comparison; it exposes `POST /auth/login`, which answers
+ * either a `SessionUser` or a 401. This file owns the cookie. Nothing here
+ * hashes, compares or stores a credential — it forwards one, once, and keeps the
+ * answer.
+ *
+ * The token is a JWT rather than a database session for the same reason: a
+ * database session would need this app to hold a connection to Postgres, and the
+ * whole point of the service-token design in `lib/service-token.ts` is that the
+ * web tier talks to the API and to nothing else.
+ *
+ * `trustHost: true` because the app is only ever reached over a host it was
+ * configured with (`AUTH_URL`), never behind an unknown proxy. Without it Auth.js
+ * refuses to run outside Vercel and the failure is a 500 with no useful message.
+ */
+
+/**
+ * How long a wrong password takes to be wrong.
+ *
+ * Auth.js turns anything thrown out of `authorize` into a generic
+ * `CredentialsSignin`, so the reason never reaches the browser, which is correct:
+ * "no such account" and "wrong password" are the same answer to anyone who is not
+ * the account holder. Returning `null` produces exactly that.
+ */
+async function verifyCredentials(raw: unknown): Promise<SessionUser | null> {
+  const parsed = credentialsSchema.safeParse(raw);
+  if (!parsed.success) return null;
+
+  try {
+    return await apiRequest(endpoints.login, sessionUserSchema, {
+      method: 'POST',
+      json: parsed.data,
+    });
+  } catch (error) {
+    // A 401 is a wrong password and is not worth a log line. Anything else is
+    // the API being unreachable or answering something the contract rejects,
+    // which is an operational fault the reader of the logs needs to see — the
+    // symptom in the browser is identical either way.
+    if (!(error instanceof ApiError) || error.status !== 401) {
+      console.error('[auth] sign-in could not be completed:', error);
+    }
+    return null;
+  }
+}
+
+export const { handlers, auth, signIn, signOut } = NextAuth({
+  trustHost: true,
+  session: { strategy: 'jwt' },
+  // Auth.js's own sign-in page is never rendered: the app has one that matches
+  // the rest of it, and an unstyled framework page is a visible seam.
+  pages: { signIn: '/login', error: '/login' },
+  providers: [
+    Credentials({
+      // Declared so Auth.js knows which fields the credentials callback carries.
+      // The real validation is `credentialsSchema` above; this is metadata.
+      credentials: {
+        email: { label: 'Email', type: 'email' },
+        password: { label: 'Password', type: 'password' },
+      },
+      authorize: (raw) => verifyCredentials(raw),
+    }),
+  ],
+  callbacks: {
+    /**
+     * `user` is only populated on the sign-in pass; every later call gets the
+     * token alone. Parsing rather than casting is what makes the type in
+     * `types/next-auth.d.ts` true: a response that has drifted from the contract
+     * produces no session instead of a session whose `currency` is undefined.
+     */
+    jwt({ token, user }) {
+      if (!user) return token;
+      const parsed = sessionUserSchema.safeParse(user);
+      if (!parsed.success) return null;
+      token.fin = parsed.data;
+      return token;
+    },
+    /**
+     * Returning a `DefaultSession` (no `user`) is legal and is the honest answer
+     * for a cookie minted before this shape existed. `lib/session.ts` reads
+     * `session?.user ?? null` and redirects, which is what should happen.
+     */
+    session({ session, token }) {
+      const parsed = sessionUserSchema.safeParse(token.fin);
+      if (!parsed.success) return { expires: session.expires };
+      return { ...session, user: parsed.data };
+    },
+  },
+});

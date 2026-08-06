@@ -1,0 +1,115 @@
+# syntax=docker/dockerfile:1.7
+#
+# Multi-stage build for @fin/api (NestJS 10 on @nestjs/platform-express).
+#
+# Build from the REPO ROOT, not from infra/, so the build context contains the
+# whole workspace (pnpm-lock.yaml, every package @fin/api depends on):
+#   docker build -f infra/Dockerfile.api -t fin-api .
+#
+# Four stages, each earning its own cache boundary:
+#   base       -- the OS packages every later stage needs, once.
+#   fetch      -- populates pnpm's content-addressable store from the lockfile
+#                 alone. Cache key is pnpm-lock.yaml; untouched by source edits.
+#   build      -- full workspace source, installed offline, compiled.
+#   prod-deps  -- pnpm's own "deploy": only @fin/api's production
+#                 dependencies, as real files, in one directory.
+#   runtime    -- the shipped image. Never sees a devDependency, source, or
+#                 the rest of the monorepo.
+
+FROM node:20-bookworm-slim AS base
+# Prisma's query engine binary dynamically links against libssl, and
+# bookworm-slim ships neither openssl nor ca-certificates. Missing this fails
+# two different ways depending on the stage: `prisma generate` cannot verify
+# its download, and the compiled engine refuses to load at container start
+# with "library libssl.so.3 not found" -- a runtime crash with no build-time
+# signal. Installed once here so build and runtime stages both inherit it.
+RUN apt-get update -qq \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+# pnpm is not preinstalled on node:20-bookworm-slim. corepack is, and pinning
+# the exact version here keeps the image's package manager identical to the
+# one pnpm-lock.yaml was written by (packageManager: pnpm@9.15.0 in the root
+# package.json) instead of whatever corepack would otherwise resolve.
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+WORKDIR /repo
+
+# --- fetch -------------------------------------------------------------
+FROM base AS fetch
+COPY pnpm-lock.yaml pnpm-workspace.yaml ./
+# --ignore-scripts: verified against this exact lockfile that omitting it
+# breaks the build. `pnpm fetch` populates the store by installing into a
+# throwaway virtual store, which runs postinstall for every package that has
+# one -- including simple-git-hooks, a ROOT devDependency with nothing to do
+# with @fin/api. Its bundled postinstall.js walks up looking for the
+# nearest package.json, which this stage has not copied (only the lockfile
+# has, on purpose, so this layer's cache key stays the lockfile alone), and
+# crashes the whole fetch with ENOENT. None of the scripts this repo's
+# dependency tree runs at install time (git-hooks setup, an OpenCollective
+# donation nag, an esbuild platform-binary fetch nothing here uses) produce
+# anything the build below needs; the one script the build genuinely
+# depends on -- `prisma generate` -- is invoked explicitly, further down.
+RUN pnpm fetch --ignore-scripts
+
+# --- build ---------------------------------------------------------------
+FROM fetch AS build
+COPY . .
+# --offline forces resolution from the store `pnpm fetch` already populated
+# from the lockfile, so a change to application code can never silently
+# pull a dependency version the lockfile does not pin. --ignore-scripts for
+# the same reason as the fetch stage above: simple-git-hooks' postinstall
+# still has nothing to attach to inside a Docker build (no .git directory --
+# see .dockerignore), and this repo's own scripts/install-hooks.mjs already
+# no-ops without one; the packaged postinstall.js it depends on does not.
+RUN pnpm install --frozen-lockfile --offline --ignore-scripts
+# @fin/db's own "build" script is `prisma generate && tsc`, and the turbo run
+# below would generate it as part of the dependency graph regardless -- but
+# generating it as an explicit first step means a schema error is reported
+# against "prisma generate" and not buried inside a wider turbo failure.
+RUN pnpm --filter @fin/db run generate
+# turbo, not a bare `pnpm --filter @fin/api build`: the API imports @fin/db,
+# @fin/shared, @fin/categorize, @fin/import and @fin/notifications through
+# their compiled dist/ output (each package's "main" field points there), and
+# a bare filtered build only runs @fin/api's own script, leaving those
+# dependencies unbuilt. `...` walks the dependency graph turbo.json already
+# encodes, in the right order, with turbo's own cache.
+RUN pnpm exec turbo run build --filter=@fin/api...
+
+# --- prod-deps -------------------------------------------------------------
+FROM build AS prod-deps
+# Resolves the workspace graph and writes a single directory holding only
+# @fin/api's production dependencies as real files (not symlinks into
+# /repo), so the runtime stage can copy it alone and never see
+# devDependencies, TypeScript source, or the rest of the monorepo. Verified
+# by hand against this repo's actual output (not assumed from pnpm's docs):
+# `pnpm deploy` copies each package's real directory contents, dist/ included,
+# even though dist/ is listed in .gitignore -- it does not filter files the
+# way `npm pack`/`pnpm pack` do.
+RUN pnpm --filter @fin/api deploy --prod /prod/api
+# Guards the one fact the runtime CMD depends on. A silent absence here would
+# otherwise surface only as "Cannot find module" on the container's first
+# start, with nothing pointing back at the build that produced it.
+RUN test -f /prod/api/dist/main.js || \
+  (echo "prod-deps: /prod/api/dist/main.js is missing after pnpm deploy. apps/api/src/main.ts either does not exist or failed to compile." >&2 && exit 1)
+
+# --- runtime -----------------------------------------------------------
+FROM node:20-bookworm-slim AS runtime
+RUN apt-get update -qq \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/* \
+  && groupadd --gid 1001 fin \
+  && useradd --uid 1001 --gid fin --shell /usr/sbin/nologin --no-create-home fin
+WORKDIR /app
+COPY --from=prod-deps --chown=fin:fin /prod/api ./
+USER fin
+ENV NODE_ENV=production
+EXPOSE 4000
+# PORT wins over API_PORT in apps/api/src/config/config.ts (the name every
+# container runtime injects), so the healthcheck honours the same precedence
+# rather than assuming the EXPOSEd default is what the process actually
+# bound. /health reports 503, not a thrown error, when a dependency is down
+# (see packages/shared/src/contracts), so this reads the status code instead
+# of requiring a 2xx -- a degraded-but-answering process is a different
+# failure than an unreachable one, and Docker's health state should say which.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD node -e "require('http').get('http://127.0.0.1:'+(process.env.PORT||process.env.API_PORT||4000)+'/health',(r)=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"
+CMD ["node", "dist/main.js"]

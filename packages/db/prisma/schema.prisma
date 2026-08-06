@@ -1,0 +1,381 @@
+// The ledger.
+//
+// Three modelling decisions carry most of this file, and each one is a
+// constraint in the database rather than a rule in a service, because a service
+// check is only as good as the assumption that one process is running.
+//
+//   1. **Amounts are `Int`: a count of the currency's minor unit.** Not
+//      `Decimal`, not `Float`. Postgres `numeric` is exact and would also work,
+//      but it arrives in JavaScript as a `Decimal` object that every consumer
+//      then has to remember not to coerce, and `Number(decimal)` is silent.
+//      Integers cannot be coerced wrongly. `int4` caps a single row at
+//      ±21,474,836.47 in a two-decimal currency, which no personal transaction
+//      reaches; `SUM(int)` in Postgres returns `bigint`, so the aggregate has
+//      room even when a decade of rows does not.
+//
+//   2. **Dates are `date`, not `timestamptz`.** A transaction happens on a day.
+//      Storing an instant makes "which month is this in" depend on where the
+//      reader is standing, which is precisely the question every report asks.
+//      See packages/shared/src/time/day.ts.
+//
+//   3. **A budget covers a range of months and may not overlap another for the
+//      same category.** Enforced by a GiST exclusion constraint in
+//      `20260801121000_ledger_invariants`, not by a `findFirst` before insert:
+//      two browser tabs both pass that check and both insert.
+//
+// Table and column names are snake_case because a third of the reporting path
+// is hand-written SQL (`SUM`/`GROUP BY` over a covering index), and quoting
+// `"amountMinor"` in every one of those queries is how a typo becomes a runtime
+// error instead of a compile-time one.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/client"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Migrations cannot run through a transaction-mode pooler. Locally this is the
+  // same value; the split exists so the repo does not need editing to run behind
+  // one.
+  directUrl = env("DIRECT_DATABASE_URL")
+}
+
+enum AccountKind {
+  checking
+  savings
+  card
+  cash
+
+  @@map("account_kind")
+}
+
+enum CategoryKind {
+  income
+  expense
+
+  @@map("category_kind")
+}
+
+/// Where a transaction's category came from.
+///
+/// Stored rather than inferred, because it decides who wins when the rule engine
+/// runs again over rows that already have a category: `manual` is never
+/// overwritten. Without this column the only way to know whether a category was
+/// a person's decision or a guess is to guess.
+enum CategorySource {
+  manual
+  rule
+  none
+
+  @@map("category_source")
+}
+
+enum MatcherType {
+  contains
+  equals
+  startsWith
+  regex
+
+  @@map("matcher_type")
+}
+
+enum ImportStatus {
+  pending
+  ready
+  committed
+  failed
+
+  @@map("import_status")
+}
+
+enum ImportRowStatus {
+  new
+  duplicate
+  error
+
+  @@map("import_row_status")
+}
+
+enum AlertLevel {
+  approaching
+  exceeded
+
+  @@map("alert_level")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  name         String   @db.VarChar(120)
+  /// Drives every `Intl` call the reader sees, and the tie-break when a
+  /// statement's decimal separator is genuinely ambiguous.
+  locale       String   @default("es-ES") @db.VarChar(35)
+  /// Used only to answer "what month is it for this person" on a dashboard.
+  /// Stored rows carry no zone at all.
+  timeZone     String   @default("Europe/Madrid") @map("time_zone") @db.VarChar(64)
+  currency     String   @default("EUR") @db.Char(3)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  accounts     Account[]
+  categories   Category[]
+  rules        Rule[]
+  transactions Transaction[]
+  budgets      Budget[]
+  imports      Import[]
+  alerts       Alert[]
+
+  @@map("users")
+}
+
+model Account {
+  id       String      @id @default(cuid())
+  userId   String      @map("user_id")
+  name     String      @db.VarChar(80)
+  kind     AccountKind
+  currency String      @db.Char(3)
+  /// The balance the account started at, before any transaction in the ledger.
+  /// The current balance is this plus the sum of the rows, computed on read —
+  /// a stored running balance is a denormalisation that goes wrong the first
+  /// time a row is edited or deleted.
+  openingBalanceMinor Int      @default(0) @map("opening_balance_minor")
+  archivedAt          DateTime? @map("archived_at") @db.Timestamptz(3)
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+  imports      Import[]
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@map("accounts")
+}
+
+model Category {
+  id     String       @id @default(cuid())
+  userId String       @map("user_id")
+  name   String       @db.VarChar(60)
+  kind   CategoryKind
+  /// Stable index into the chart palette. Assigned once and stored, so a
+  /// category keeps its colour when the ordering of a chart's rows changes —
+  /// which it does every month.
+  colorSlot Int      @map("color_slot")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rules        Rule[]
+  budgets      Budget[]
+  transactions Transaction[]
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@map("categories")
+}
+
+model Rule {
+  id         String      @id @default(cuid())
+  userId     String      @map("user_id")
+  categoryId String      @map("category_id")
+  matcherType MatcherType @map("matcher_type")
+  matcherValue String     @map("matcher_value") @db.VarChar(200)
+  /// Lower runs first. Ties break on `id`, so two rules with the same priority
+  /// still produce one deterministic answer rather than whichever row Postgres
+  /// happened to return first.
+  priority   Int         @default(100)
+  minAmountMinor Int?    @map("min_amount_minor")
+  maxAmountMinor Int?    @map("max_amount_minor")
+  active     Boolean     @default(true)
+  createdAt  DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category     Category      @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+
+  @@index([userId, active, priority, id])
+  @@map("rules")
+}
+
+model Transaction {
+  id         String  @id @default(cuid())
+  userId     String  @map("user_id")
+  accountId  String  @map("account_id")
+  categoryId String? @map("category_id")
+  /// Which rule assigned the category, when one did. Kept so the UI can say
+  /// *why* a row is in a category; an unexplained automatic classification is
+  /// one nobody trusts, and one nobody can correct at the source.
+  ruleId     String? @map("rule_id")
+  importId   String? @map("import_id")
+
+  /// The day the bank booked it. `date`, never a timestamp.
+  bookedOn    DateTime @map("booked_on") @db.Date
+  /// Signed: income positive, expense negative. One column, not a debit/credit
+  /// pair, because every aggregate this app runs is a `SUM` and a pair turns
+  /// each of them into a `CASE`.
+  amountMinor Int      @map("amount_minor")
+  currency    String   @db.Char(3)
+  description String   @db.VarChar(300)
+  /// The description reduced to a comparable form (case-folded, accent-stripped,
+  /// reference numbers removed). What the rule engine matches on and what
+  /// duplicate detection compares; the raw `description` is what the reader sees.
+  merchant    String?  @db.VarChar(120)
+
+  categorySource CategorySource @default(none) @map("category_source")
+  notes          String?        @db.VarChar(1000)
+
+  /// The bank's own identifier for the movement, when the statement carries one.
+  /// Unique per account, which makes re-importing the same file a no-op at the
+  /// database level rather than at the importer's discretion.
+  externalId  String? @map("external_id") @db.VarChar(120)
+  /// Hash of (account, day, amount, normalised description). Deliberately **not**
+  /// unique: people do buy the same coffee twice on the same day. It drives the
+  /// importer's "possible duplicate, review this" queue, which a human resolves.
+  fingerprint String  @db.Char(64)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account  Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  category Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  rule     Rule?     @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+  import   Import?   @relation(fields: [importId], references: [id], onDelete: SetNull)
+
+  /// Re-importing a statement is a no-op when the bank gives us an id.
+  /// Postgres treats NULLs as distinct, so rows without one are unaffected.
+  @@unique([accountId, externalId])
+  /// The reporting index. Every aggregate is "this user, this date window,
+  /// grouped by category", and this is the order that serves it: equality on
+  /// user, range on day, and the two payload columns carried in the index so
+  /// the rollup is an index-only scan and never visits the heap.
+  ///
+  /// In the database, `categoryId` and `amountMinor` are INCLUDE (non-key)
+  /// columns — see `20260801121000_ledger_invariants` — so they do not widen the
+  /// b-tree's internal pages. Prisma cannot express INCLUDE, and its drift
+  /// detection reads the index back with all four columns flattened into the key
+  /// list. Listing four here is therefore what makes `prisma migrate dev` agree
+  /// with the database; the migration is the file that says which two are
+  /// actually keys.
+  @@index([userId, bookedOn, categoryId, amountMinor], map: "transactions_user_id_booked_on_idx")
+  @@index([userId, categoryId, bookedOn])
+  @@index([accountId, bookedOn])
+  @@index([userId, fingerprint])
+  @@index([importId])
+  @@map("transactions")
+}
+
+model Budget {
+  id         String @id @default(cuid())
+  userId     String @map("user_id")
+  categoryId String @map("category_id")
+  limitMinor Int    @map("limit_minor")
+
+  /// First day of the first month the limit applies to.
+  effectiveFrom DateTime  @map("effective_from") @db.Date
+  /// First day of the **last** month it applies to, or NULL for "still in force".
+  /// Month granularity is the product's unit; the exclusion constraint converts
+  /// this to a half-open day range so two budgets for one category can never
+  /// overlap.
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  alerts   Alert[]
+
+  @@index([userId])
+  @@index([categoryId, effectiveFrom])
+  @@map("budgets")
+}
+
+model Import {
+  id        String       @id @default(cuid())
+  userId    String       @map("user_id")
+  accountId String       @map("account_id")
+  filename  String       @db.VarChar(255)
+  byteSize  Int          @map("byte_size")
+  /// SHA-256 of the uploaded bytes. Unique per user: uploading the identical
+  /// file twice resumes the first import rather than creating a second one.
+  sha256    String       @db.Char(64)
+  status    ImportStatus @default(pending)
+  /// What the parser decided about this file — delimiter, decimal separator and
+  /// why, date format, column mapping. Kept so a wrong reading can be explained
+  /// rather than merely corrected.
+  format    Json?
+  storedPath String?     @map("stored_path") @db.VarChar(500)
+  error     String?      @db.VarChar(1000)
+
+  totalRows     Int @default(0) @map("total_rows")
+  newRows       Int @default(0) @map("new_rows")
+  duplicateRows Int @default(0) @map("duplicate_rows")
+  errorRows     Int @default(0) @map("error_rows")
+
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  committedAt DateTime? @map("committed_at") @db.Timestamptz(3)
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account      Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  rows         ImportRow[]
+  transactions Transaction[]
+
+  @@unique([userId, sha256])
+  @@index([userId, createdAt])
+  @@map("imports")
+}
+
+model ImportRow {
+  id         String          @id @default(cuid())
+  importId   String          @map("import_id")
+  lineNumber Int             @map("line_number")
+  status     ImportRowStatus
+  message    String?         @db.VarChar(500)
+
+  bookedOn    DateTime? @map("booked_on") @db.Date
+  amountMinor Int?      @map("amount_minor")
+  description String    @db.VarChar(300)
+  /// The original line, kept verbatim. When an import goes wrong the question is
+  /// always "what did the file actually say", and by then the file is gone.
+  raw         String    @db.VarChar(2000)
+
+  suggestedCategoryId String? @map("suggested_category_id")
+  /// Human-readable reason the category was suggested, e.g. `rule "mercadona"`.
+  suggestedBy         String? @map("suggested_by") @db.VarChar(200)
+  duplicateOfId       String? @map("duplicate_of_id")
+
+  import Import @relation(fields: [importId], references: [id], onDelete: Cascade)
+
+  @@unique([importId, lineNumber])
+  @@index([importId, status])
+  @@map("import_rows")
+}
+
+model Alert {
+  id       String     @id @default(cuid())
+  userId   String     @map("user_id")
+  budgetId String     @map("budget_id")
+  /// First day of the month the alert is about.
+  month    DateTime   @db.Date
+  level    AlertLevel
+  limitMinor Int      @map("limit_minor")
+  spentMinor Int      @map("spent_minor")
+
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  readAt      DateTime? @map("read_at") @db.Timestamptz(3)
+  /// When the email actually went out. Null means the channel refused or the
+  /// alert was raised in a context with no channel configured.
+  deliveredAt DateTime? @map("delivered_at") @db.Timestamptz(3)
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  budget Budget @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+
+  /// One alert per budget per month per level, enforced here rather than by a
+  /// "have I sent this already" query. Every transaction that lands in an
+  /// over-budget category re-evaluates the budget, so without this a busy
+  /// Saturday sends eleven identical emails.
+  @@unique([budgetId, month, level])
+  @@index([userId, createdAt])
+  @@map("alerts")
+}

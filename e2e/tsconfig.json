@@ -1,0 +1,15 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    // Playwright transpiles each file on its own with esbuild, so the specs must
+    // be valid ES modules resolved the way Node resolves them. `seed-facts.ts`
+    // reads `import.meta.url`, which requires a module target that has it.
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": ["playwright.config.ts", "fixtures/**/*.ts", "tests/**/*.ts"]
+}

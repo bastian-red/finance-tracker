@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    // Node16, not CommonJS + Node. The classic `Node` resolver predates the
+    // `exports` field and cannot see a subpath: `@fin/shared/server` resolves at
+    // runtime and fails to typecheck, with TypeScript reporting that the types
+    // exist but "could not be resolved under your current moduleResolution
+    // setting". That subpath is not optional — it is the boundary that keeps
+    // `node:crypto` out of the browser bundle (see packages/shared/src/server).
+    //
+    // Emit is unchanged: none of these packages sets `"type": "module"`, so
+    // Node16 compiles them as CommonJS exactly as before, and relative imports
+    // still need no file extension.
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "target": "ES2022",
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
+  }
+}

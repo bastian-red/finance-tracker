@@ -1,0 +1,80 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+
+  // Turbo 2 defaults to strict env mode: a task's child process sees only the
+  // names below plus turbo's own system allowlist. Everything else is stripped
+  // silently. Three sibling projects in this portfolio shipped with a short list
+  // here, which meant `pnpm dev` started an API with no AUTH_SECRET and every
+  // server render died with ECONNREFUSED against it. The default is kept
+  // deliberately -- "loose" would hide the next under-declaration instead of
+  // fixing this one. scripts/env-contract.mjs keeps these lists honest against
+  // .env.example and against what the source actually reads.
+
+  // Feeds the cache key. Only variables that change what gets BUILT belong here,
+  // and never a secret: turbo hashes the value, so a rotated SMTP password would
+  // invalidate every cached build and put the credential into the hash input.
+  "globalEnv": ["API_BASE_URL", "DEFAULT_CURRENCY", "NEXT_PUBLIC_API_BASE_URL", "NODE_ENV"],
+
+  // Reaches the process without entering the cache key: runtime wiring, ports,
+  // credentials, operational tuning. Changing one of these must not force a
+  // rebuild, but the process must still see it.
+  "globalPassThroughEnv": [
+    "API_PORT",
+    "APP_BASE_URL",
+    "APP_VERSION",
+    "AUTH_SECRET",
+    "AUTH_URL",
+    "BUDGET_ALERT_THRESHOLD",
+    "DATABASE_URL",
+    "DEFAULT_LOCALE",
+    "DIRECT_DATABASE_URL",
+    "DUPLICATE_WINDOW_DAYS",
+    "IMPORT_ROOT",
+    "MAIL_FROM",
+    "MAX_IMPORT_BYTES",
+    "PORT",
+    "RATE_LIMIT_AUTH",
+    "RATE_LIMIT_GLOBAL",
+    "RATE_LIMIT_IMPORT",
+    "REDIS_URL",
+    "REPORT_CACHE_TTL_SECONDS",
+    "SMTP_HOST",
+    "SMTP_PASSWORD",
+    "SMTP_PORT",
+    "SMTP_SECURE",
+    "SMTP_USER",
+    // Not application configuration, and deliberately absent from .env.example.
+    // The money and date helpers in packages/shared are parsed and formatted
+    // against explicit locales, and their tests pin TZ so a machine in Santiago
+    // and a runner in UTC agree on which month a transaction falls in. Without
+    // this line turbo strips TZ and `TZ=Pacific/Kiritimati pnpm test` would
+    // quietly run in the machine's own zone, passing while proving nothing.
+    "TZ",
+    "WEB_PORT"
+  ],
+
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "typecheck": {
+      "dependsOn": ["^build"]
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "outputs": ["coverage/**"]
+    },
+    "test:integration": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "test:e2e": {
+      "cache": false
+    }
+  }
+}

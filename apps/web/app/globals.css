@@ -1,0 +1,925 @@
+/*
+ * The design system: primitives, palette, and every component rule.
+ *
+ * The identity is "violet on cool paper". A personal finance app is read, not
+ * operated: someone opens it once a week, looks at four numbers, and decides
+ * whether they are fine. That argues for a quiet page with one accent that only
+ * ever means "this is the thing to look at", and against the console aesthetic
+ * that suits an admin tool. The canvas is a very slightly cool white rather than
+ * pure white so a column of white cards has something to sit on.
+ *
+ * Rules for editing this file:
+ *
+ *   - never hardcode a colour, size or duration in a component rule. Every one of
+ *     them is a token below;
+ *   - every foreground/background pair is measured by lib/contrast.test.ts, which
+ *     parses this file rather than a copy of the palette. Change a value and the
+ *     test tells you whether it still clears AA;
+ *   - state is never carried by colour alone. There is a proven reason, not a
+ *     stylistic one: a search over the full 500-900 and 300-600 ramps found no
+ *     combination where green, amber and red all clear 4.5:1 on #f7f6fb *and*
+ *     separate by 1.5:1 from each other in greyscale. The best pairs available
+ *     are 2.0:1 in light and 2.68:1 in dark. So every budget state and every
+ *     transaction direction ships a glyph and a word beside the colour, and the
+ *     colour is the third channel rather than the only one;
+ *   - status ink (--income, --expense, --approaching, --exceeded) is used as text
+ *     on --bg and --surface only. On --surface-2 the best of them measures 4.29:1
+ *     in light and 4.21:1 in dark, which is under AA for text. --surface-2 carries
+ *     --text and --muted, and nothing else.
+ *
+ * Fonts (Newsreader / Public Sans / Roboto Mono) are wired in app/layout.tsx.
+ */
+
+/* ==========================================================================
+   Primitives -- identical in both colour schemes
+   ========================================================================== */
+
+:root {
+  /* Spacing, 4px base. Every padding, margin and gap comes from here. */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+  --s-12: 48px;
+  --s-16: 64px;
+
+  /* Type scale. */
+  --t-2xs: 11px;
+  --t-xs: 12px;
+  --t-sm: 13px;
+  --t-base: 15px;
+  --t-md: 17px;
+  --t-lg: 21px;
+  --t-xl: 27px;
+  --t-2xl: 34px;
+
+  --lh-tight: 1.15;
+  --lh-snug: 1.35;
+  --lh-base: 1.6;
+
+  --track-tight: -0.011em;
+  --track-wide: 0.06em;
+
+  /* Motion. Honoured by prefers-reduced-motion at the bottom of this file. */
+  --motion-fast: 110ms;
+  --motion-base: 180ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Focus. One ring across the whole app, painted in --accent, which clears
+     6.61:1 in light and 6.88:1 in dark against the canvas -- well over the 3:1
+     WCAG 1.4.11 asks of a non-text indicator. */
+  --focus-w: 2px;
+  --focus-offset: 2px;
+
+  --measure: 68ch;
+
+  /* Corner radius. 6px: soft enough that a page of cards does not read as a
+     spreadsheet, tight enough that a 24px-tall table chip still looks square. */
+  --radius: 6px;
+
+  /* next/font injects --font-display / --font-ui / --font-mono on <html>. These
+     wrap them with fallbacks under different names, because a custom property
+     cannot reference itself. */
+  --ff-display: var(--font-display), 'Iowan Old Style', Georgia, serif;
+  --ff-ui: var(--font-ui), -apple-system, system-ui, 'Segoe UI', sans-serif;
+  --ff-mono: var(--font-mono), 'SF Mono', ui-monospace, monospace;
+
+  /* ---- Semantic palette: light is the default ---------------------------- */
+
+  /* Cool paper. Not #ffffff, so that a white card has an edge without a border. */
+  --bg: #f7f6fb;
+  --surface: #ffffff;
+  --surface-2: #eeecf5;
+  /* Hairline. Decorative only: it separates rows, it never bounds a control, so
+     WCAG 1.4.11 does not apply to it. */
+  --border: #dedae9;
+  /* Bounds every control. Held at 4.82:1 against --bg for 1.4.11's 3:1, with
+     room to spare because it also has to work on --surface-2. */
+  --border-strong: #6f6a80;
+  --text: #1b1a24;
+  --muted: #55506a;
+  /* Violet. Used as fill, rule, focus ring *and* as text, which is why it is a
+     600-weight step rather than the 500 that would look better on a button and
+     fail as a word. 6.61:1 on --bg. */
+  --accent: #6d28d9;
+  /* The accent as a fill under white text. */
+  --accent-ink: #ffffff;
+
+  /* Status. Data and state only: never chrome, never a category, never a chart
+     series that is not the thing it names. */
+  --income: #15803d;
+  --expense: #7f1d1d;
+  --approaching: #b45309;
+  --exceeded: #7f1d1d;
+
+  /* Category swatches.
+     Ten hues, one per colorSlot in packages/shared/src/categories.ts. They are
+     decoration: the swatch is a 10px square that always sits beside the category
+     name, so identity is carried by the word and the colour only helps you find
+     the same row twice. That is deliberate -- ten categorical hues cannot pass a
+     CVD check, which is exactly why the by-category chart is a sorted bar in a
+     single hue instead of a ten-slice donut. Every swatch still clears 3:1
+     against all three surfaces (lib/contrast.test.ts measures it) so it is
+     visible rather than a smudge. */
+  --cat-0: #0e7490;
+  --cat-1: #a21caf;
+  --cat-2: #a16207;
+  --cat-3: #be123c;
+  --cat-4: #0369a1;
+  --cat-5: #4d7c0f;
+  --cat-6: #9333ea;
+  --cat-7: #c2410c;
+  --cat-8: #047857;
+  --cat-9: #4338ca;
+  /* UNCATEGORISED_SLOT (-1). Grey on purpose: "not yet decided" is not a
+     category and must not look like one. */
+  --cat-none: #55506a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12111a;
+    --surface: #1b1926;
+    --surface-2: #232032;
+    --border: #2c2941;
+    --border-strong: #7d7794;
+    --text: #eae8f2;
+    --muted: #a49fb8;
+    --accent: #a78bfa;
+    /* The dark accent is light, so its fill takes dark ink. */
+    --accent-ink: #12111a;
+
+    --income: #86efac;
+    --expense: #ef4444;
+    --approaching: #fcd34d;
+    --exceeded: #ef4444;
+
+    --cat-0: #67e8f9;
+    --cat-1: #f0abfc;
+    --cat-2: #fde68a;
+    --cat-3: #fda4af;
+    --cat-4: #7dd3fc;
+    --cat-5: #bef264;
+    --cat-6: #d8b4fe;
+    --cat-7: #fdba74;
+    --cat-8: #6ee7b7;
+    --cat-9: #a5b4fc;
+    --cat-none: #a49fb8;
+  }
+}
+
+/* ==========================================================================
+   Reset and document
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+* {
+  margin: 0;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--ff-ui);
+  font-size: var(--t-base);
+  line-height: var(--lh-base);
+  -webkit-font-smoothing: antialiased;
+  min-height: 100dvh;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--ff-display);
+  font-weight: 500;
+  line-height: var(--lh-tight);
+  letter-spacing: var(--track-tight);
+}
+
+h1 {
+  font-size: var(--t-xl);
+}
+
+h2 {
+  font-size: var(--t-lg);
+}
+
+h3 {
+  font-size: var(--t-md);
+}
+
+a {
+  color: var(--accent);
+  text-underline-offset: 3px;
+}
+
+/* One ring, everywhere. A keyboard user should not have to relearn what focus
+   looks like when they move from the nav into a table. */
+:focus-visible {
+  outline: var(--focus-w) solid var(--accent);
+  outline-offset: var(--focus-offset);
+  border-radius: var(--radius);
+}
+
+/* Every figure a reader compares rather than reads. Tabular numerals so a column
+   of amounts lines up on the decimal point, which is the entire job. */
+.num {
+  font-family: var(--ff-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Keyboard-only escape from the nav into the page. */
+.skip-link {
+  position: absolute;
+  left: var(--s-2);
+  top: calc(-1 * var(--s-12));
+  z-index: 10;
+  padding: var(--s-2) var(--s-4);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  transition: top var(--motion-fast) var(--ease);
+}
+
+.skip-link:focus {
+  top: var(--s-2);
+}
+
+/* ==========================================================================
+   Layout
+   ========================================================================== */
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+
+.page {
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: var(--s-8) var(--s-4) var(--s-16);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-8);
+}
+
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+
+.page-head p {
+  color: var(--muted);
+  font-size: var(--t-sm);
+  max-width: var(--measure);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.stack-tight {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-3);
+}
+
+.grid-3 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--s-4);
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--s-4);
+}
+
+/* ==========================================================================
+   Nav
+   ========================================================================== */
+
+.nav {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.nav-inner {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: var(--s-3) var(--s-4);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-4);
+}
+
+.nav-brand {
+  font-family: var(--ff-display);
+  font-size: var(--t-md);
+  color: var(--text);
+  text-decoration: none;
+  margin-right: auto;
+}
+
+.nav-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1);
+  list-style: none;
+  padding: 0;
+}
+
+.nav-link {
+  display: inline-block;
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--radius);
+  color: var(--muted);
+  text-decoration: none;
+  font-size: var(--t-sm);
+}
+
+.nav-link:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+/* aria-current carries the state; the underline is the visible half of the same
+   fact, so it does not depend on the colour change alone. */
+.nav-link[aria-current='page'] {
+  color: var(--text);
+  background: var(--surface-2);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.nav-user {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  font-size: var(--t-sm);
+  color: var(--muted);
+}
+
+.foot {
+  margin-top: auto;
+  border-top: 1px solid var(--border);
+  padding: var(--s-4);
+  text-align: center;
+  font-size: var(--t-xs);
+  color: var(--muted);
+}
+
+/* ==========================================================================
+   Card, table, chip
+   ========================================================================== */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--s-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-2);
+}
+
+.card-head p {
+  color: var(--muted);
+  font-size: var(--t-sm);
+}
+
+.tile-label {
+  font-size: var(--t-xs);
+  letter-spacing: var(--track-wide);
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.tile-value {
+  font-size: var(--t-2xl);
+  line-height: var(--lh-tight);
+}
+
+.tile-note {
+  font-size: var(--t-sm);
+  color: var(--muted);
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--t-sm);
+}
+
+caption {
+  text-align: left;
+  color: var(--muted);
+  font-size: var(--t-sm);
+  padding-bottom: var(--s-2);
+}
+
+th,
+td {
+  text-align: left;
+  padding: var(--s-2) var(--s-3);
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+thead th {
+  background: var(--surface-2);
+  color: var(--muted);
+  font-weight: 500;
+  font-size: var(--t-xs);
+  letter-spacing: var(--track-wide);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+td.right,
+th.right {
+  text-align: right;
+}
+
+tbody tr:hover {
+  background: var(--surface-2);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  padding: 2px var(--s-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: var(--t-xs);
+  white-space: nowrap;
+}
+
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: none;
+  background: var(--cat-none);
+}
+
+.empty {
+  color: var(--muted);
+  font-size: var(--t-sm);
+  padding: var(--s-6) 0;
+  text-align: center;
+}
+
+/* ==========================================================================
+   Status: colour is the third channel, after the glyph and the word
+   ========================================================================== */
+
+.state {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--s-1);
+  white-space: nowrap;
+}
+
+.state-glyph {
+  font-family: var(--ff-mono);
+  font-size: var(--t-sm);
+}
+
+.state-income {
+  color: var(--income);
+}
+
+.state-expense {
+  color: var(--expense);
+}
+
+.state-approaching {
+  color: var(--approaching);
+}
+
+.state-exceeded {
+  color: var(--exceeded);
+}
+
+.state-neutral {
+  color: var(--muted);
+}
+
+/* ==========================================================================
+   Meter -- the budget progress bar
+   ========================================================================== */
+
+/* The category a meter is about. It sits in a `.card-head` beside the state
+   word, so it is sized down from the heading level it happens to carry: the
+   level is decided by the surrounding outline (h3 on the report, h3 in the
+   budgets list), and a document outline is not a type scale. */
+.meter-name {
+  font-family: var(--ff-ui);
+  font-size: var(--t-base);
+  font-weight: 600;
+  letter-spacing: normal;
+  margin: 0;
+}
+
+.meter {
+  height: 8px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  /* --used is set inline from integer basis points, never from a float. If the
+     property were ever missing, calc() would invalidate the whole declaration
+     and a 0% bar and a broken bar would render identically -- which is what
+     lib/tokens.test.ts exists to catch. */
+  width: calc(var(--used, 0) * 1%);
+  background: var(--muted);
+}
+
+.meter-under .meter-fill {
+  background: var(--income);
+}
+
+.meter-approaching .meter-fill {
+  background: var(--approaching);
+}
+
+/* The exceeded bar is full and striped. The stripe is the non-colour channel:
+   it survives greyscale, forced-colors and a photocopy. */
+.meter-exceeded .meter-fill {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--exceeded),
+    var(--exceeded) 4px,
+    var(--surface) 4px,
+    var(--surface) 7px
+  );
+}
+
+/* ==========================================================================
+   Forms
+   ========================================================================== */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+
+.field > label {
+  font-size: var(--t-sm);
+  color: var(--text);
+}
+
+.field-hint {
+  font-size: var(--t-xs);
+  color: var(--muted);
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  font-size: var(--t-sm);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: var(--s-2) var(--s-3);
+  min-height: 36px;
+  width: 100%;
+}
+
+input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  accent-color: var(--accent);
+}
+
+input[type='file'] {
+  padding: var(--s-2);
+}
+
+input.num,
+td .num {
+  font-family: var(--ff-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  font: inherit;
+  font-size: var(--t-sm);
+  min-height: 36px;
+  padding: var(--s-2) var(--s-4);
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--ease);
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.1);
+}
+
+.btn-quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  padding: var(--s-1) var(--s-2);
+  min-height: 28px;
+}
+
+.btn-quiet:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* A form-level message. The role="alert" on the element is what announces it;
+   the border is what makes it visible without relying on the colour. */
+.notice {
+  border: 1px solid var(--border-strong);
+  border-left-width: 4px;
+  border-radius: var(--radius);
+  padding: var(--s-3);
+  font-size: var(--t-sm);
+  background: var(--surface);
+}
+
+.notice-error {
+  border-left-color: var(--expense);
+}
+
+.notice-ok {
+  border-left-color: var(--income);
+}
+
+/* ==========================================================================
+   Charts
+   ========================================================================== */
+
+.chart {
+  width: 100%;
+  height: 260px;
+}
+
+/**
+ * The by-category chart, whose height is a function of how many bars it has.
+ *
+ * Recharts' `ResponsiveContainer` measures its parent. `height="100%"` inside a
+ * box with no height of its own resolves to zero, and the chart renders nothing
+ * at all: no error, no empty state, just the `<details>` table alternative
+ * underneath a blank strip. This class existed only in the component's
+ * `className` until the demo capture photographed the gap.
+ *
+ * `--bars` is set inline by `CategoryBarChart`. The fallback of 6 is what makes
+ * a missing value a short chart rather than an invisible one, which is the same
+ * reasoning as `tokens.test.ts`: an undeclared custom property inside `calc()`
+ * invalidates the whole declaration, so "no value" and "broken" look identical
+ * without one.
+ *
+ * 34px per bar, because a category name and its amount are 12px text on a bar
+ * with padding either side; ten categories in the 260px used by the trend chart
+ * gives each one 18px and the labels overlap.
+ */
+.chart-bars {
+  width: 100%;
+  height: calc(var(--bars, 6) * 34px + 32px);
+  min-height: 120px;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-4);
+  font-size: var(--t-xs);
+  color: var(--muted);
+}
+
+.chart-legend li {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.chart-legend ul,
+.chart-legend {
+  list-style: none;
+  padding: 0;
+}
+
+.legend-key {
+  width: 18px;
+  height: 0;
+  border-top-width: 2px;
+  border-top-style: solid;
+  flex: none;
+}
+
+/* The expense series is dashed in the chart, so its legend key is dashed too.
+   That pairing is the whole point of having a legend here: the two series are
+   told apart by line style first and by colour second, because a green and a
+   dark red collapse to a 1.04:1 greyscale ratio and a reader with a deficiency
+   would be matching two identical grey lines to two identical grey keys. */
+.legend-key-dashed {
+  border-top-style: dashed;
+}
+
+.legend-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  flex: none;
+}
+
+.chart-tooltip {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: var(--s-2) var(--s-3);
+  font-size: var(--t-xs);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 12%);
+}
+
+/* The accessible alternative to every chart. Always present, never hidden. */
+details.data-table {
+  border-top: 1px solid var(--border);
+  padding-top: var(--s-3);
+}
+
+details.data-table > summary {
+  cursor: pointer;
+  font-size: var(--t-sm);
+  color: var(--muted);
+}
+
+details.data-table > summary:focus-visible {
+  outline: var(--focus-w) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+
+details.data-table[open] > summary {
+  margin-bottom: var(--s-3);
+}
+
+/* ==========================================================================
+   Auth pages
+   ========================================================================== */
+
+.auth-shell {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: var(--s-6) var(--s-4);
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--s-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+}
+
+.auth-card h1 {
+  font-size: var(--t-xl);
+}
+
+.auth-card p {
+  color: var(--muted);
+  font-size: var(--t-sm);
+}
+
+/* ==========================================================================
+   Import preview
+   ========================================================================== */
+
+/* The recategorise control lives inside a table cell, so it must not add a
+   line box of its own: an inline-block wrapper here pushes every row 4px taller
+   than the rows without one and the ledger stops aligning. */
+.cell-form {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.import-row-skipped td {
+  opacity: 0.55;
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.import-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-5);
+  font-size: var(--t-sm);
+}
+
+.import-counts div {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ==========================================================================
+   Reduced motion
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
