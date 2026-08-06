@@ -33,7 +33,17 @@ test.describe('signing in', () => {
   });
 
   test('an anonymous visitor is redirected off every signed-in route', async ({ page }) => {
-    for (const path of ['/', '/transactions', '/budgets', '/reports', '/rules', '/import']) {
+    const paths = [
+      '/',
+      '/transactions',
+      '/budgets',
+      '/reports',
+      '/rules',
+      '/import',
+      '/alerts',
+      '/status',
+    ];
+    for (const path of paths) {
       await page.goto(path);
       await expect(page, `${path} should redirect an anonymous visitor`).toHaveURL(/\/login/);
     }

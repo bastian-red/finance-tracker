@@ -497,7 +497,148 @@ async function main(): Promise<void> {
     },
   });
 
+  /**
+   * The alert history those budgets would have raised.
+   *
+   * **Why the seed writes these rather than letting the app.**
+   * `AlertsService.evaluate` runs on the tail of an HTTP request that wrote a
+   * transaction, and it only ever evaluates the *current* month, deliberately: a
+   * backfilled row that pushes a closed period over its limit must not mail
+   * anybody, because the period is closed and nobody can act on it. This seed
+   * writes rows straight to Postgres and invents fourteen months of history, so
+   * the path that raises an alert never runs and the table stayed empty. A
+   * reader cloning the repo opened /alerts and saw the empty state, which is the
+   * one screen that proves nothing.
+   *
+   * So the crossings are computed the same way the app computes them, from the
+   * real per-category monthly spend against the real limits, and written with the
+   * same uniqueness the app relies on: one row per (budget, month, level), which
+   * is `@@unique([budgetId, month, level])` in Postgres and not a flag anything
+   * sets. Both levels can exist for one month, and that is correct: a category
+   * that reaches 80% and then passes 100% crossed two thresholds and the reader
+   * saw two emails.
+   *
+   * `deliveredAt` is left null on the older half. The alert row is the record and
+   * the email is a delivery of it; a channel is allowed to fail, and the list has
+   * to be readable when it did. A seed where every alert was delivered would
+   * never show that.
+   */
+  const budgetRows = await prisma.budget.findMany({
+    where: { userId: user.id },
+    select: {
+      id: true,
+      categoryId: true,
+      effectiveFrom: true,
+      effectiveTo: true,
+      limitMinor: true,
+    },
+  });
+
+  /**
+   * Expense per (category, month, day), in date order.
+   *
+   * Per *day*, not per month, and that is the difference between a plausible
+   * history and a self-contradictory one. An alert records what was spent at the
+   * moment the threshold was crossed, not what the month ended at: writing the
+   * month's final total onto the `approaching` row produces "Approaching, 424,67
+   * of 300,00 (142%)" on the page, which is a sentence that cannot be true. So
+   * the running total is walked and each threshold is recorded at the first day
+   * it went over.
+   */
+  const spendRows = await prisma.$queryRaw<
+    { categoryId: string; day: Date; amountMinor: bigint }[]
+  >`
+    SELECT t.category_id AS "categoryId",
+           t.booked_on   AS "day",
+           SUM(t.amount_minor) AS "amountMinor"
+    FROM transactions t
+    WHERE t.user_id = ${user.id} AND t.amount_minor < 0 AND t.category_id IS NOT NULL
+    GROUP BY 1, 2
+    ORDER BY 1, 2
+  `;
+
+  /** 80% of the limit: the shipped BUDGET_ALERT_THRESHOLD, in basis points. */
+  const APPROACHING_BASIS_POINTS = 8000;
+
+  /** The running total per (category, month), rebuilt day by day. */
+  const running = new Map<string, number>();
+  const raised = new Set<string>();
+  let alertsWritten = 0;
+
+  for (const row of spendRows) {
+    const iso = row.day.toISOString().slice(0, 10);
+    const month = iso.slice(0, 7);
+    const budget = budgetRows.find(
+      (candidate) =>
+        candidate.categoryId === row.categoryId &&
+        `${month}-01` >= candidate.effectiveFrom.toISOString().slice(0, 10) &&
+        (candidate.effectiveTo === null ||
+          `${month}-01` <= candidate.effectiveTo.toISOString().slice(0, 10)),
+    );
+    if (budget === undefined) continue;
+
+    const key = `${row.categoryId}|${month}`;
+    const spentMinor = (running.get(key) ?? 0) + Math.abs(Number(row.amountMinor));
+    running.set(key, spentMinor);
+
+    // Integer basis points, the same comparison `evaluateBudget` makes and for
+    // the same reason: `0.8 * 40000` is 32000.000000000004 in a double, and a
+    // budget reading 80.0000001% used would fire one cent early.
+    const usedBasisPoints = Math.floor((spentMinor * 10_000) / budget.limitMinor);
+
+    // The **state** at this moment, mapped to a level exactly as
+    // `alertLevelFor` maps it in `@fin/notifications`: `approaching` is 80% to
+    // 100% inclusive, `exceeded` is strictly over. One level per evaluation, not
+    // "every threshold below this one".
+    //
+    // That distinction is visible on the page. A month whose spend jumps from
+    // 60% to 102% in a single transaction gets an `exceeded` row and no
+    // `approaching` row, because the app never saw it approaching. Emitting both
+    // produced "Approaching, 306,07 of 300,00 (102%)", a sentence that cannot be
+    // true, on a screen whose whole job is to be believed.
+    const level =
+      usedBasisPoints > 10_000
+        ? 'exceeded'
+        : usedBasisPoints >= APPROACHING_BASIS_POINTS
+          ? 'approaching'
+          : null;
+
+    if (level !== null) {
+      // One row per (budget, month, level), forever. That is
+      // `@@unique([budgetId, month, level])` in Postgres and not a flag anything
+      // sets, which is why re-crossing the same threshold on the next
+      // transaction adds nothing.
+      const uniqueKey = `${budget.id}|${month}|${level}`;
+      if (raised.has(uniqueKey)) continue;
+      raised.add(uniqueKey);
+
+      const raisedAt = new Date(`${iso}T19:00:00.000Z`);
+      const olderThanThreeMonths = month < addMonths(REFERENCE_MONTH, -3);
+
+      await prisma.alert.create({
+        data: {
+          userId: user.id,
+          budgetId: budget.id,
+          month: toUtcDate(makeDay(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 1)),
+          level,
+          limitMinor: budget.limitMinor,
+          // What had been spent when it fired, not what the month ended at.
+          spentMinor,
+          createdAt: raisedAt,
+          // Older alerts have been seen; the recent ones are the unread queue the
+          // dashboard counts.
+          readAt: olderThanThreeMonths ? raisedAt : null,
+          // The oldest third went out before the mail server in this story was
+          // reachable. `deliveredAt: null` beside a real row is what the alerts
+          // page exists to keep readable.
+          deliveredAt: olderThanThreeMonths ? raisedAt : null,
+        },
+      });
+      alertsWritten += 1;
+    }
+  }
   const counts = {
+    alerts: alertsWritten,
     transactions: await prisma.transaction.count({ where: { userId: user.id } }),
     uncategorised: await prisma.transaction.count({ where: { userId: user.id, categoryId: null } }),
     categories: categories.size,
@@ -513,6 +654,7 @@ async function main(): Promise<void> {
       `  categories     ${counts.categories}`,
       `  rules          ${counts.rules}`,
       `  budgets        ${counts.budgets}`,
+      `  alerts         ${counts.alerts}`,
     ].join('\n'),
   );
 }

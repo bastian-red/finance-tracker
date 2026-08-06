@@ -88,6 +88,12 @@ test('captures the demo', async ({ signedIn: page }) => {
     await shot(page, 'budgets');
   });
 
+  await test.step('what crossed a budget', async () => {
+    await page.goto('/alerts');
+    await expect(page.getByRole('table')).toBeVisible();
+    await shot(page, 'alerts');
+  });
+
   await test.step('the rule tester', async () => {
     await page.goto('/rules');
     await page.getByLabel('Pattern').first().fill('mercadona');

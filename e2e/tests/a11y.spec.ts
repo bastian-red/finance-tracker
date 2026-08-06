@@ -30,6 +30,11 @@ const ROUTES = [
   { path: '/categories', name: 'categories' },
   { path: '/rules', name: 'rules' },
   { path: '/import', name: 'import' },
+  { path: '/alerts', name: 'alerts' },
+  // Not in the nav -- it is a footer affordance -- so `scripts/dev-smoke.sh`,
+  // which reads the hrefs out of nav.tsx, does not pick it up and this list has
+  // to name it by hand.
+  { path: '/status', name: 'status' },
 ] as const;
 
 const SCHEMES = ['light', 'dark'] as const;

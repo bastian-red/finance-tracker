@@ -15,7 +15,12 @@ import { StatTile } from '../../components/stat-tile';
 import { trendSeries } from '../../lib/chart';
 import { money } from '../../lib/format';
 import { categoryIndex } from '../../lib/lookup';
-import { fetchCategories, fetchMonthlyReport, fetchTransactions } from '../../lib/queries';
+import {
+  fetchAlerts,
+  fetchCategories,
+  fetchMonthlyReport,
+  fetchTransactions,
+} from '../../lib/queries';
 import { requireUser } from '../../lib/session';
 
 export const metadata: Metadata = { title: 'Dashboard' };
@@ -41,10 +46,11 @@ export default async function DashboardPage(): Promise<JSX.Element> {
   const user = await requireUser();
   const format = { currency: user.currency, locale: user.locale };
 
-  const [report, recent, categories] = await Promise.all([
+  const [report, recent, categories, alerts] = await Promise.all([
     fetchMonthlyReport({ trailing: TREND_MONTHS }),
     fetchTransactions({ limit: RECENT_ROWS }),
     fetchCategories(),
+    fetchAlerts(),
   ]);
 
   const byId = categoryIndex(categories);
@@ -65,6 +71,26 @@ export default async function DashboardPage(): Promise<JSX.Element> {
    * screen did not.
    */
   const budgets = report.budgets.filter((status) => status.month === report.month);
+  const unread = alerts.filter((alert) => alert.readAt === null).length;
+
+  /**
+   * The newest month in the window that actually has rows, when this one has none.
+   *
+   * Not a fallback in the data: the totals above stay this month's, because this
+   * month's income really is zero and saying otherwise would be a lie about the
+   * one number people open the app for. It is a pointer. A ledger whose first
+   * screen is three zeroes with no explanation reads as broken, and the honest
+   * reading -- "nothing has landed yet; here is where the numbers are" -- takes
+   * one sentence and a link.
+   */
+  const lastActive = [...report.trend]
+    .reverse()
+    .find(
+      (point) =>
+        point.month !== report.month && (point.incomeMinor !== 0 || point.expenseMinor !== 0),
+    );
+  const nothingYet =
+    report.totals.incomeMinor === 0 && report.totals.expenseMinor === 0 && lastActive !== undefined;
 
   return (
     <>
@@ -77,6 +103,15 @@ export default async function DashboardPage(): Promise<JSX.Element> {
               ? 'These totals came from the cache.'
               : 'These totals were just computed.'}
           </p>
+          {nothingYet && lastActive ? (
+            <p className="tile-note">
+              Nothing has landed in {thisMonth} yet.{' '}
+              <Link href={`/reports?month=${lastActive.month}`}>
+                See {formatMonth(parseMonth(lastActive.month), user.locale)}
+              </Link>
+              , the last month with transactions in it.
+            </p>
+          ) : null}
         </div>
         <Link className="btn" href={`/reports?month=${viewing}`}>
           Full report
@@ -110,7 +145,16 @@ export default async function DashboardPage(): Promise<JSX.Element> {
       <section className="card" aria-labelledby="budgets-heading">
         <div className="card-head">
           <h2 id="budgets-heading">Budgets</h2>
-          <Link href="/budgets">Manage budgets</Link>
+          {/* The count is the only place an alert is discoverable from the screen
+              people actually open, and it is a word beside a number rather than a
+              red dot: a dot is a colour and a shape, and neither says how many. */}
+          {unread === 0 ? (
+            <Link href="/budgets">Manage budgets</Link>
+          ) : (
+            <Link href="/alerts">
+              {unread} unread {unread === 1 ? 'alert' : 'alerts'}
+            </Link>
+          )}
         </div>
         {budgets.length === 0 ? (
           <p className="empty">

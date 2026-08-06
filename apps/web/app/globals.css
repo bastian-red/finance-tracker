@@ -226,6 +226,17 @@ a {
   text-underline-offset: 3px;
 }
 
+/* Inline command names and endpoint paths, on /status and nowhere else so far.
+   `--surface-2` carries only `--text` and `--muted` (see the header): status ink
+   measures 4.29:1 on it in light, under AA, so nothing coloured goes here. */
+code {
+  font-family: var(--ff-mono);
+  font-size: 0.92em;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  padding: 0.1em 0.35em;
+}
+
 /* One ring, everywhere. A keyboard user should not have to relearn what focus
    looks like when they move from the nav into a table. */
 :focus-visible {
@@ -493,8 +504,27 @@ th.right {
   text-align: right;
 }
 
+/* Hover marks the row with a rule, not a fill, and that is a measured decision
+   rather than a stylistic one.
+
+   The fill was `--surface-2`, and status ink lands in these tables: the ledger's
+   direction tag, the alert level, the import row status. On `--surface-2` the
+   best of the four status colours measures 4.29:1 in light and 4.21:1 in dark,
+   both under AA, which is exactly what the palette note at the top of this file
+   warns about. axe caught it on the alerts table in Firefox and only because the
+   pointer happened to be resting on a row when the scan ran.
+
+   Tinting less does not fix it. A search over the ramp from `--surface` toward
+   `--surface-2` puts the darkest safe light tint at #f4f3f9 (worst ink 4.55:1)
+   and the darkest safe dark tint at #1d1b29 (worst ink 4.50:1) -- and that dark
+   one is 1.02:1 against the surface it sits on, which is not a visible hover.
+   There is no fill that is both safe and useful in both schemes.
+
+   An inset rule costs nothing in contrast, is visible in both schemes, and uses
+   the accent for what the accent means everywhere else in this app: this is the
+   thing to look at. */
 tbody tr:hover {
-  background: var(--surface-2);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .chip {

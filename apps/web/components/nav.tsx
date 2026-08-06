@@ -25,6 +25,7 @@ const LINKS: readonly { href: string; label: string }[] = [
   { href: '/categories', label: 'Categories' },
   { href: '/rules', label: 'Rules' },
   { href: '/import', label: 'Import' },
+  { href: '/alerts', label: 'Alerts' },
 ];
 
 export function Nav({ email }: { email: string }): JSX.Element {

@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { Nav } from '../../components/nav';
-import { PUBLIC_API_BASE_URL } from '../../lib/config';
 import { requireUser } from '../../lib/session';
 
 /**
@@ -33,13 +32,14 @@ export default async function AppLayout({
       </main>
 
       <footer className="foot">
-        {/* The health check is linked rather than described. Nothing in this
-            portfolio is deployed, so "it runs" is demonstrated by a reader
-            cloning the repo and following this link to a real dependency check
-            rather than by a status page. `PUBLIC_API_BASE_URL` and not
-            `apiBaseUrl()`: inside compose the latter is `http://api:4000`, which
-            resolves for the Next server and for nobody's browser. */}
-        <Link href={`${PUBLIC_API_BASE_URL}/health`}>API health</Link>
+        {/* The status page, not the raw `/health` JSON.
+            An earlier version of this footer linked the endpoint directly and
+            argued that a page was unnecessary because nothing here is deployed.
+            That had it backwards: with no public URL and no uptime dashboard, a
+            page a reader can open *is* the only demonstration that this app knows
+            whether its dependencies are answering. The endpoint is still one click
+            further on, for anyone who would rather read the JSON. */}
+        <Link href="/status">Service status</Link>
       </footer>
     </div>
   );

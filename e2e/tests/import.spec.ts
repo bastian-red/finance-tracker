@@ -92,6 +92,12 @@ test.describe('importing a statement', () => {
       await expect(commit).toBeEnabled();
       await commit.click();
       await expect(notice(page).first()).toContainText(/\d+ transactions? imported/);
+      // Wait for the render the commit's `router.refresh()` produces before
+      // navigating. The notice appears first and the refresh follows it, so a
+      // `page.goto` fired in between aborts a request that is already in flight:
+      // Firefox reports `NS_BINDING_ABORTED` and Chromium swallows it. The
+      // post-commit links are what that refresh renders.
+      await expect(page.getByRole('link', { name: 'See them in the ledger' })).toBeVisible();
     });
 
     await test.step('the same bytes are refused outright', async () => {

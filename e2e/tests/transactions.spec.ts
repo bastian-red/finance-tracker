@@ -1,4 +1,4 @@
-import { expect, test } from '../fixtures/app';
+import { expect, notice, test } from '../fixtures/app';
 import { referenceMonth } from '../fixtures/seed-facts';
 
 /**
@@ -104,6 +104,95 @@ test.describe('the ledger', () => {
     await next.first().click();
     await expect(page).toHaveURL(/cursor=/);
     await expect(page.getByRole('table')).toBeVisible();
+  });
+
+  test('a row can be added, edited and deleted by hand', async ({ signedIn: page }) => {
+    // The importer covers the common case; this is cash, a transfer, and the
+    // correction somebody makes when a statement rounded something. An app that
+    // can only ingest a CSV cannot be made to agree with reality.
+    const description = `E2E hand-entered ${process.pid}`;
+
+    await test.step('add it', async () => {
+      await page.goto('/transactions');
+      // Scoped to the region: the filter bar above the table also has a
+      // description field ("Description contains"), and an unscoped
+      // `getByLabel('Description')` is a strict-mode violation against both.
+      const add = page.getByRole('region', { name: 'Add a transaction' });
+      await add.getByLabel('Date').fill(`${referenceMonth}-15`);
+      // Signed, and the sign is the whole meaning: there is no direction toggle
+      // because there is no `kind` column. Negative is money out.
+      await add.getByLabel(/^Amount/).fill('-41.30');
+      await add.getByLabel('Description').fill(description);
+      await add.getByRole('button', { name: 'Add transaction' }).click();
+
+      await expect(notice(page).first()).toContainText('Transaction added');
+    });
+
+    await test.step('it is in the ledger, formatted from the stored locale', async () => {
+      await page.goto(`/transactions?search=${encodeURIComponent(description)}`);
+      const row = page.getByRole('row').filter({ hasText: description });
+      await expect(row).toHaveCount(1);
+      // es-ES, not the browser's en-US: a comma decimal proves the app formatted
+      // from the database rather than from the machine it happened to run on.
+      await expect(row).toContainText('41,30');
+      await expect(row).toContainText('Out');
+    });
+
+    await test.step('edit the description', async () => {
+      const row = page.getByRole('row').filter({ hasText: description });
+      await row.getByRole('group').getByText('Edit').click();
+      // Scoped to the row, so the create form's Description is out of reach.
+      await row.getByLabel('Description').fill(`${description} corrected`);
+      await row.getByRole('button', { name: 'Save', exact: true }).click();
+      await expect(notice(page).first()).toContainText('Transaction saved');
+
+      await page.goto(`/transactions?search=${encodeURIComponent(description)}`);
+      await expect(page.getByRole('row').filter({ hasText: 'corrected' })).toHaveCount(1);
+    });
+
+    await test.step('delete it, in two steps', async () => {
+      const row = page.getByRole('row').filter({ hasText: description });
+      await row.getByRole('group').getByText('Edit').click();
+      await row.getByRole('button', { name: 'Delete', exact: true }).click();
+      // The confirmation carries the consequence in its own label rather than in
+      // a confirm() dialog.
+      await row.getByRole('button', { name: 'Yes, delete this transaction' }).click();
+
+      // The row going away is the confirmation, and it is the only one that can
+      // be asserted without a race: the `<Notice>` for a delete is rendered
+      // *inside* the row being deleted, so `router.refresh()` takes it with the
+      // row. Chromium happened to read it before the re-render landed and
+      // Firefox did not, which is a flake either way round.
+      await expect(row).toHaveCount(0);
+
+      await page.goto(`/transactions?search=${encodeURIComponent(description)}`);
+      await expect(page.getByRole('row').filter({ hasText: description })).toHaveCount(0);
+    });
+  });
+
+  test('an amount that is not a number is refused in words', async ({ signedIn: page }) => {
+    await page.goto('/transactions');
+    const add = page.getByRole('region', { name: 'Add a transaction' });
+    await add.getByLabel('Date').fill(`${referenceMonth}-15`);
+    await add.getByLabel(/^Amount/).fill('lots');
+    await add.getByLabel('Description').fill('E2E not an amount');
+    await add.getByRole('button', { name: 'Add transaction' }).click();
+
+    // The sentence names what to type. "Bad Request" would not.
+    await expect(notice(page).first()).toContainText('plain number');
+  });
+
+  test('the amount field says which way the money is going, in words', async ({
+    signedIn: page,
+  }) => {
+    // The sign is the only thing separating income from an expense, and a minus
+    // at 13px is the worst possible carrier for it. The form restates it.
+    await page.goto('/transactions');
+    const add = page.getByRole('region', { name: 'Add a transaction' });
+    await add.getByLabel(/^Amount/).fill('-52.40');
+    await expect(add.getByText(/going out/)).toBeVisible();
+    await add.getByLabel(/^Amount/).fill('2400');
+    await expect(add.getByText(/coming in/)).toBeVisible();
   });
 
   test('a date filter reaches the API rather than being applied in the browser', async ({

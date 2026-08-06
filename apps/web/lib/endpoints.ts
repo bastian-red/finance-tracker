@@ -52,5 +52,7 @@ export const endpoints = {
   importCommit: (importId: string): string => `/imports/${id(importId)}/commit`,
 
   alerts: '/alerts',
+  /** Marking one read. A verb segment, because it is not a CRUD verb. */
+  alertRead: (alertId: string): string => `/alerts/${id(alertId)}/read`,
   health: '/health',
 } as const;

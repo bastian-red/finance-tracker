@@ -1,5 +1,6 @@
 import {
   accountSchema,
+  alertSchema,
   budgetSchema,
   budgetStatusSchema,
   categorySchema,
@@ -8,6 +9,7 @@ import {
   ruleSchema,
   transactionPageSchema,
   type Account,
+  type Alert,
   type Budget,
   type BudgetStatus,
   type Category,
@@ -43,6 +45,7 @@ const categoriesSchema = z.array(categorySchema);
 const rulesSchema = z.array(ruleSchema);
 const budgetsSchema = z.array(budgetSchema);
 const budgetStatusesSchema = z.array(budgetStatusSchema);
+const alertsSchema = z.array(alertSchema);
 
 export function fetchAccounts(): Promise<Account[]> {
   return authedRequest(endpoints.accounts, accountsSchema);
@@ -86,6 +89,18 @@ export function fetchTransactions(filters: TransactionFilters): Promise<Transact
     endpoints.transactions(transactionQueryString(filters)),
     transactionPageSchema,
   );
+}
+
+/**
+ * Every alert this ledger has raised, newest first.
+ *
+ * The list is the API's, unfiltered and uncapped, because a budget can raise at
+ * most one alert per month per level and there are single-digit budgets: the
+ * whole history is smaller than one page of the ledger. Paginating it would add a
+ * cursor nobody would ever use.
+ */
+export function fetchAlerts(): Promise<Alert[]> {
+  return authedRequest(endpoints.alerts, alertsSchema);
 }
 
 export function fetchImportPreview(importId: string): Promise<ImportPreview> {

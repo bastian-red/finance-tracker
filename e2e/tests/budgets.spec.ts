@@ -142,5 +142,9 @@ async function createBudget(
 async function deleteBudget(page: Page, category: string): Promise<void> {
   const row = page.getByRole('listitem').filter({ hasText: category }).last();
   await row.getByRole('button', { name: 'Delete this budget' }).click();
-  await expect(notice(page).first()).toBeVisible();
+  // The row going away is the confirmation. `EditBudgetForm` renders its
+  // `<Notice>` inside the `<li>` being deleted, so `router.refresh()` takes the
+  // message with the row: asserting on it is a race that Chromium wins and
+  // Firefox loses.
+  await expect(row).toHaveCount(0);
 }

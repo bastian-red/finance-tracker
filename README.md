@@ -188,9 +188,11 @@ Then open http://localhost:3000 and sign in:
 | -------------------- | -------------------- |
 | `demo@finance.local` | `demo-password-1234` |
 
-The seed writes 747 transactions across 12 months, two accounts, ten categories, budgets that are
-deliberately over, under and near their limits, and the rules that categorise them. Outbound alert
-mail lands in Mailhog at http://localhost:8029, not in anyone's inbox.
+The seed writes 747 transactions across 14 months, two accounts, ten categories, budgets that are
+deliberately over, under and near their limits, the rules that categorise them, and the 27 alerts
+those budgets raised along the way. The alerts are computed by walking each month's spending day by
+day and recording the moment a threshold was actually crossed, so an "approaching" row never shows
+102% used. Outbound alert mail lands in Mailhog at http://localhost:8029, not in anyone's inbox.
 
 `pnpm dev` points at `scripts/dev.sh`, not at `turbo run dev`, and that is deliberate. Turbo does not
 read dotenv files and Next.js only reads a `.env` inside its own package directory, so `turbo run
@@ -225,12 +227,12 @@ worth having.
 Five lanes, three of them free.
 
 ```bash
-pnpm test                    # gate: 886 unit tests in 53 files, no network, no DB
+pnpm test                    # gate: 913 unit tests in 55 files, no network, no DB
 pnpm env:contract            # the four-way env agreement, instant
 pnpm scan:invisible          # no character in source that a reviewer cannot see
 ./scripts/dev-smoke.sh       # boots the documented `pnpm dev` and asserts real content
 ./scripts/integration.sh     # real Postgres + real Redis
-./scripts/e2e.sh             # 50 Playwright tests, including axe over every route
+./scripts/e2e.sh             # 136 Playwright tests, including axe over every route
 ```
 
 There are no LLM evals here: this project has no AI feature to measure.
@@ -320,18 +322,47 @@ Every number below was produced by running the check named beside it, not by est
 
 | Outcome                                        | Measured                               | Enforced by                              |
 | ---------------------------------------------- | -------------------------------------- | ---------------------------------------- |
-| axe-core violations, 7 routes × 2 schemes      | **0** of 14 scans                      | `e2e/tests/a11y.spec.ts`                 |
+| axe-core violations, 9 routes × 2 schemes      | **0** of 18 scans                      | `e2e/tests/a11y.spec.ts`                 |
 | Foreground/background pairs below WCAG AA      | **0** of 86 measured pairs             | `apps/web/lib/contrast.test.ts`          |
 | `var(--x)` references resolving to nothing     | **0**                                  | `apps/web/lib/tokens.test.ts`            |
 | Classes a component uses with no CSS rule      | **0**                                  | `apps/web/lib/classnames.test.ts`        |
-| Invisible characters in source                 | **0** across 275 files                 | `scripts/invisible-chars.mjs`            |
+| Table rows repainting under status ink         | **0**                                  | `apps/web/lib/contrast.test.ts`          |
+| Invisible characters in source                 | **0** across 284 files                 | `scripts/invisible-chars.mjs`            |
 | Env names read but never declared to turbo     | **0** of 29 read                       | `scripts/env-contract.mjs`               |
-| Signed-in routes that render from the database | **7** of 7                             | `scripts/dev-smoke.sh`                   |
-| Unit tests                                     | **898** in 54 files, under 3s          | `pnpm test`, on every commit             |
-| E2E tests                                      | **102**, Chromium and Firefox, 0 flaky | `./scripts/e2e.sh`                       |
+| Signed-in routes that render from the database | **8** of 8                             | `scripts/dev-smoke.sh`                   |
+| Unit tests                                     | **913** in 55 files, under 3s          | `pnpm test`, on every commit             |
+| E2E tests                                      | **136**, Chromium and Firefox, 0 flaky | `./scripts/e2e.sh`                       |
 | Identity drift across the portfolio            | no shared canvas, accent or typeface   | `identity-distinct.mjs` (local, 4 repos) |
 
 ## Architecture
+
+One request, from a keystroke to a row:
+
+```
+browser
+   │  session cookie (Auth.js, JWT strategy — no session table)
+   ▼
+apps/web            Next.js 14, App Router. Owns the browser session.
+   │  server component calls lib/session.authedRequest()
+   │  mintServiceToken(): HS256, 5 minutes, signed with AUTH_SECRET
+   ▼  Authorization: Bearer …
+apps/api            NestJS 10. Holds no session state at all.
+   │  ServiceTokenGuard verifies with algorithms: ['HS256'] named explicitly
+   │  ZodValidationPipe parses against packages/shared/src/contracts
+   ▼
+   ├──▶ PostgreSQL 16    the invariants: EXCLUDE, CHECK, triggers, unique indexes
+   ├──▶ Redis 7          report cache (a version counter), rate limit budgets
+   └──▶ SMTP             budget alerts. Allowed to fail; the alert row is written anyway.
+
+           the API calls three pure packages, none of which does any I/O:
+
+           services/import        bytes → rows. No db handle, no clock, no env.
+           services/categorize    rules → a match, with a ReDoS probe ladder
+           services/notifications alert planning and rendering. Pure until `send`.
+```
+
+The two halves share exactly one secret and one set of zod schemas. Nothing else crosses: the web
+tier has no database connection, and the API has no idea a browser exists.
 
 ```
 finance-tracker/

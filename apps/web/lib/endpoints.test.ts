@@ -45,6 +45,7 @@ describe('id segments', () => {
     ['importById', endpoints.importById],
     ['importFormat', endpoints.importFormat],
     ['importCommit', endpoints.importCommit],
+    ['alertRead', endpoints.alertRead],
   ] as const;
 
   it('build the obvious path for an ordinary cuid', () => {
@@ -55,6 +56,7 @@ describe('id segments', () => {
     expect(endpoints.importById('imp_123')).toBe('/imports/imp_123');
     expect(endpoints.importFormat('imp_123')).toBe('/imports/imp_123/format');
     expect(endpoints.importCommit('imp_123')).toBe('/imports/imp_123/commit');
+    expect(endpoints.alertRead('alr_123')).toBe('/alerts/alr_123/read');
   });
 
   it('percent-encode every id, so no id can invent a path or a query', () => {
@@ -63,9 +65,10 @@ describe('id segments', () => {
       // The separators the id contained must be gone: a raw `/` adds a segment,
       // a raw `?` starts a query string that the API then parses as its own.
       expect(path.replace(/^\/[a-z]+\//, ''), name).not.toContain('?');
-      expect(path.replace(/^\/[a-z]+\//, '').replace(/\/(format|commit)$/, ''), name).not.toContain(
-        '/',
-      );
+      expect(
+        path.replace(/^\/[a-z]+\//, '').replace(/\/(format|commit|read)$/, ''),
+        name,
+      ).not.toContain('/');
       expect(path, name).not.toContain(' ');
       expect(path, name).toContain(encodeURIComponent(HOSTILE));
     }
@@ -76,6 +79,7 @@ describe('id segments', () => {
     // routes are the only place this could go wrong.
     expect(endpoints.importCommit(HOSTILE).endsWith('/commit')).toBe(true);
     expect(endpoints.importFormat(HOSTILE).endsWith('/format')).toBe(true);
+    expect(endpoints.alertRead(HOSTILE).endsWith('/read')).toBe(true);
   });
 });
 

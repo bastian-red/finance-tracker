@@ -166,6 +166,73 @@ describe('token extraction', () => {
   });
 });
 
+/**
+ * The claim the status-ink loop above makes about the stylesheet, checked.
+ *
+ * That loop measures the four status colours on `--bg` and `--surface` only, and
+ * justifies the omission of `--surface-2` with "the stylesheet does not put them
+ * there". It did, and nothing was checking: `tbody tr:hover` filled the row with
+ * `--surface-2`, and every table in this app renders status ink -- the ledger's
+ * direction tag, the alert level, the import row status. On that surface the best
+ * of the four measures 4.29:1 in light and 4.21:1 in dark. axe found it on the
+ * alerts table in Firefox, and only because the pointer happened to be resting on
+ * a row when the scan ran, which is not a way to find anything twice.
+ *
+ * So the assertion is structural rather than numeric: a table row may not paint a
+ * background in any state. Hover is marked with an inset rule instead, which
+ * costs nothing in contrast. Tinting less does not rescue it -- the darkest safe
+ * dark tint is 1.02:1 against the surface it sits on, which is not a visible
+ * hover -- so "use a lighter fill" is not the fix and this gate says so.
+ */
+describe('surfaces status ink can actually land on', () => {
+  const css = globals;
+
+  /**
+   * Every declaration block that can style a **body** row.
+   *
+   * `thead th` is deliberately outside this set: the header row carries column
+   * labels in `--text`, never status ink, so its own fill is measured by the
+   * ordinary text loop above and not by this one. Data rows are the ones with a
+   * direction tag or an alert level in them.
+   */
+  function rowBlocks(): { selector: string; body: string }[] {
+    const blocks: { selector: string; body: string }[] = [];
+    for (const match of css.matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
+      const selector = (match[1] ?? '').trim();
+      if (selector.startsWith('@')) continue;
+      const bodyRow = /\btbody\b/.test(selector) || /^(tr|td|th)\b/.test(selector);
+      if (bodyRow && !/\bthead\b/.test(selector)) {
+        blocks.push({ selector, body: match[2] ?? '' });
+      }
+    }
+    return blocks;
+  }
+
+  it('finds the table rules, so a broken scan cannot pass silently', () => {
+    expect(rowBlocks().length).toBeGreaterThan(2);
+  });
+
+  it('no table row paints a background in any state', () => {
+    const painting = rowBlocks()
+      .filter(({ body }) => /(^|[;\s])background(-color)?\s*:/.test(body))
+      .map(({ selector }) => selector);
+
+    expect(
+      painting,
+      'a table row that repaints its background puts status ink on a surface the ' +
+        'contrast loop above never measured',
+    ).toEqual([]);
+  });
+
+  it('the hover affordance is still there, carried by something other than a fill', () => {
+    // Removing the fill and nothing else would silently drop the affordance, and
+    // this test would go green on a table you can no longer track a row across.
+    const hover = rowBlocks().find(({ selector }) => selector.includes('tr:hover'));
+    expect(hover, 'tbody tr:hover should still exist').toBeDefined();
+    expect(hover?.body).toMatch(/box-shadow|outline|border/);
+  });
+});
+
 describe.each(Object.entries(PALETTES))('%s scheme', (scheme, palette) => {
   const at = (token: string): string => resolve(palette, token);
 

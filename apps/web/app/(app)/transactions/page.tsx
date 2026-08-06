@@ -1,4 +1,4 @@
-import { formatDay, day as parseDay } from '@fin/shared';
+import { formatDay, day as parseDay, today } from '@fin/shared';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Amount, DirectionTag } from '../../../components/amount';
@@ -9,6 +9,7 @@ import { fetchAccounts, fetchCategories, fetchTransactions } from '../../../lib/
 import { requireUser } from '../../../lib/session';
 import { Filters } from './filters';
 import { Recategorise } from './recategorise';
+import { CreateTransactionForm, EditTransactionForm } from './transaction-forms';
 
 export const metadata: Metadata = { title: 'Transactions' };
 
@@ -53,6 +54,11 @@ export default async function TransactionsPage({
     : null;
   const firstHref = `/transactions${transactionQueryString(withoutCursor)}`;
 
+  // Resolved from the *reader's* stored zone, not the server's. On the first of
+  // the month a server in UTC and a reader in Madrid disagree for an hour about
+  // what day it is, and the new-transaction form would open on the wrong one.
+  const defaultDay = today(new Date(), user.timeZone);
+
   return (
     <>
       <div className="page-head">
@@ -64,6 +70,31 @@ export default async function TransactionsPage({
           </p>
         </div>
       </div>
+
+      {/* Above the filters, because adding a row is a thing you arrive here to
+          do, and below the heading, because reading the ledger is the commoner
+          one. Collapsed into a `<details>` so it costs a line until it is
+          wanted. */}
+      <section className="card" aria-labelledby="add-heading">
+        <div className="card-head">
+          <h2 id="add-heading">Add a transaction</h2>
+          <p>For cash, a transfer, or a correction. Everything else arrives by import.</p>
+        </div>
+
+        {accounts.length === 0 ? (
+          <p className="empty">
+            A transaction belongs to an account, and there are none yet. Accounts are created with
+            your first sign-in seed.
+          </p>
+        ) : (
+          <CreateTransactionForm
+            accounts={accounts}
+            categories={categories}
+            format={format}
+            defaultDay={defaultDay}
+          />
+        )}
+      </section>
 
       <Filters accounts={accounts} categories={categories} filters={filters} />
 
@@ -96,6 +127,9 @@ export default async function TransactionsPage({
                   <th scope="col">Direction</th>
                   <th className="right" scope="col">
                     Amount
+                  </th>
+                  <th scope="col">
+                    <span className="visually-hidden">Actions</span>
                   </th>
                 </tr>
               </thead>
@@ -130,6 +164,13 @@ export default async function TransactionsPage({
                         amountMinor={transaction.amountMinor}
                         format={format}
                         srDirection={false}
+                      />
+                    </td>
+                    <td>
+                      <EditTransactionForm
+                        transaction={transaction}
+                        categories={categories}
+                        format={format}
                       />
                     </td>
                   </tr>
