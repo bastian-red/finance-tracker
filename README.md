@@ -428,11 +428,3 @@ Chosen so the whole portfolio can run at once.
 | Redis        | 6383 |
 | Mailhog SMTP | 1029 |
 | Mailhog UI   | 8029 |
-
-## Not deployed, on purpose
-
-This repo is published to GitHub and hosted nowhere. Operability is demonstrated in the repo instead
-of by a URL: a `/health` endpoint that actually checks its dependencies and is exercised by the E2E
-suite, a Dockerfile per service, a `docker-compose.yml` that runs the whole stack, and CI that lints,
-typechecks, tests, smoke-boots the documented dev command and builds both images. A repo that clones
-and runs is the stronger signal than a free-tier URL that has gone cold.
