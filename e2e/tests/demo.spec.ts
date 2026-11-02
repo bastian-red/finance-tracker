@@ -57,14 +57,19 @@ test('captures the demo', async ({ signedIn: page }) => {
   test.skip(test.info().project.name !== 'chromium', 'One browser is enough for a GIF.');
   test.slow();
 
-  await test.step('the dashboard', async () => {
-    await page.goto('/');
-    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
-    // Recharts animates on mount. Waiting for the chart's own `<details>` table
-    // alternative means the frame is taken when the data is there, rather than
-    // when a clock said so.
+  await test.step('a month in numbers', async () => {
+    // The first frame is the repo's cover image, so it opens on a month with
+    // money in it. The dashboard is "this month" by design, and the seed is a
+    // fixed fourteen months ending in the reference month (see seed.ts), so
+    // recorded any time after that month the dashboard is an honest, empty
+    // "nothing has landed yet" -- right for the product, wrong for a cover.
+    await page.goto(`/reports?month=${referenceMonth}`);
     await expect(page.getByRole('group').first()).toBeVisible();
-    await shot(page, 'dashboard');
+    const moneyIn = page
+      .locator('.card', { has: page.locator('.tile-label', { hasText: 'Money in' }) })
+      .locator('.tile-value');
+    await expect(moneyIn).not.toHaveText(/^\s*0[,.]00/);
+    await shot(page, 'month');
   });
 
   await test.step('the ledger', async () => {

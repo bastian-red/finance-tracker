@@ -58,6 +58,19 @@ if [[ -f .env ]]; then
   set +a
 fi
 
+# E2E_API_PORT / E2E_WEB_PORT move the lane off 4000/3000 when another stack
+# holds them. They win over .env (sourced above), and every URL naming those
+# ports is re-derived from them, AUTH_URL and the browser bundle's API URL
+# included.
+if [[ -n "${E2E_API_PORT:-}" ]]; then
+  export API_PORT="$E2E_API_PORT" API_BASE_URL="http://localhost:${E2E_API_PORT}"
+  export NEXT_PUBLIC_API_BASE_URL="$API_BASE_URL"
+fi
+if [[ -n "${E2E_WEB_PORT:-}" ]]; then
+  export WEB_PORT="$E2E_WEB_PORT" APP_BASE_URL="http://localhost:${E2E_WEB_PORT}"
+  export AUTH_URL="$APP_BASE_URL"
+fi
+
 # Defaults match .env.example so the lane runs on a CI runner with service
 # containers and no .env file.
 export DATABASE_URL="${DATABASE_URL:-postgresql://fin:fin@localhost:5436/fin?schema=public}"
