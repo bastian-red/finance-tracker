@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { extractTokens, resolve } from './contrast';
@@ -41,23 +41,19 @@ const light = extractTokens(globals, ':root');
 const dark = { ...light, ...extractTokens(globals, '@media (prefers-color-scheme: dark)') };
 
 /**
- * Every face this app pulls out of `next/font/google`.
+ * Every face this app loads: the `<Face>` directory of each self-hosted
+ * `./fonts/<Face>/...` path a `next/font/local` call points at.
  *
  * Deliberately the same regex `web/scripts/identity-distinct.mjs` uses, because
  * that script is the only check that can see across repos and it parses this
- * exact shape: ONE import statement, SINGLE-quoted specifier. If the import is
- * ever split in two or rewritten with double quotes, the cross-repo check
- * silently reads zero faces from this project and stops being able to catch a
- * collision. It reports success while checking nothing.
+ * exact shape: a SINGLE-quoted `'./fonts/<Face>/` path. Rewrite the paths with
+ * double quotes or move the files elsewhere and the cross-repo check silently
+ * reads zero faces from this project. It reports success while checking nothing.
  */
 function importedFaces(): string[] {
-  const line = /import\s*\{([^}]*)\}\s*from\s*'next\/font\/google'/.exec(layout);
-  if (!line) throw new Error('layout.tsx imports nothing from next/font/google');
-  return line[1]!
-    .split(',')
-    .map((name) => name.trim())
-    .filter(Boolean)
-    .sort();
+  const faces = new Set<string>();
+  for (const m of layout.matchAll(/'\.\/fonts\/([A-Za-z0-9_]+)\//g)) faces.add(m[1]!);
+  return [...faces].sort();
 }
 
 describe('visual identity', () => {
@@ -75,14 +71,19 @@ describe('visual identity', () => {
     expect(importedFaces()).toEqual([...IDENTITY.fonts].sort());
   });
 
-  it('keeps the one font import in the shape the cross-repo check can parse', () => {
-    // See `importedFaces`. Two imports, or double quotes, and
-    // `web/scripts/identity-distinct.mjs` reads no faces for this project at
-    // all, which is worse than a failure because it looks like a pass.
-    const imports = [...layout.matchAll(/from\s*['"]next\/font\/google['"]/g)];
-    expect(imports, 'exactly one next/font/google import statement').toHaveLength(1);
-    expect(layout).toMatch(/import\s*\{[^}]*\}\s*from\s*'next\/font\/google'/);
+  it('self-hosts every face, with its licence beside it, and fetches nothing from Google', () => {
+    // CI failed intermittently while `next/font/google` fetched the faces at
+    // build time. See the comment above the faces in `app/layout.tsx`.
+    expect(layout).not.toMatch(/from\s*['"]next\/font\/google['"]/);
+    expect(layout).toMatch(/import localFont from 'next\/font\/local'/);
     expect(importedFaces().length, 'the cross-repo regex must find all three faces').toBe(3);
+    for (const face of IDENTITY.fonts) {
+      const dir = join(APP, 'fonts', face);
+      const files = readdirSync(dir).filter((f) => f.endsWith('.woff2'));
+      expect(files, `${face} woff2`).not.toHaveLength(0);
+      for (const file of files) expect(layout, `${face}/${file} is loaded`).toContain(`./fonts/${face}/${file}`);
+      expect(readFileSync(join(dir, 'OFL.txt'), 'utf8'), `${face} licence`).toMatch(/SIL Open Font License/);
+    }
   });
 
   it('sets each face as the CSS variable the stylesheet reads', () => {

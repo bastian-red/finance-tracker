@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { Newsreader, Public_Sans, Roboto_Mono } from 'next/font/google';
+import localFont from 'next/font/local';
 import type { ReactNode } from 'react';
 import { appBaseUrl } from '../lib/config';
 import './globals.css';
@@ -22,28 +22,33 @@ import './globals.css';
  * stay separable where a geometric sans does not. Roboto Mono carries every number
  * a reader compares, via `.num`, so a column of amounts aligns on the decimal point.
  */
-const display = Newsreader({
-  subsets: ['latin'],
+/**
+ * **Self-hosted, not fetched from Google at build time.** `next/font/google`
+ * downloads the faces during `next build`, and CI failed on it intermittently
+ * ("Failed to find font override values for font `Newsreader`"): a build that
+ * depends on a third-party fetch is not reproducible. The three variable woff2
+ * files (latin subset, from @fontsource-variable 5.3.0) live in
+ * `app/fonts/<Face>/` beside their SIL Open Font License. `lib/identity.test.ts`
+ * and `web/scripts/identity-distinct.mjs` read the face names from those paths.
+ * Variable files carry every weight the stylesheet asks for (400-600) in one
+ * download per face.
+ */
+const display = localFont({
+  src: [{ path: './fonts/Newsreader/Newsreader-latin-wght.woff2', weight: '200 800', style: 'normal' }],
   display: 'swap',
   variable: '--font-display',
-  // Only the weights the stylesheet asks for. `h1`-`h3` are 500; nothing here
-  // sets a serif at any other weight, and each unused weight is a font file a
-  // reader downloads for nothing.
-  weight: ['400', '500'],
 });
 
-const ui = Public_Sans({
-  subsets: ['latin'],
+const ui = localFont({
+  src: [{ path: './fonts/Public_Sans/PublicSans-latin-wght.woff2', weight: '100 900', style: 'normal' }],
   display: 'swap',
   variable: '--font-ui',
-  weight: ['400', '500', '600'],
 });
 
-const mono = Roboto_Mono({
-  subsets: ['latin'],
+const mono = localFont({
+  src: [{ path: './fonts/Roboto_Mono/RobotoMono-latin-wght.woff2', weight: '100 700', style: 'normal' }],
   display: 'swap',
   variable: '--font-mono',
-  weight: ['400', '500'],
 });
 
 export const metadata: Metadata = {
