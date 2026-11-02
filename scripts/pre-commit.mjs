@@ -66,6 +66,21 @@ const steps = [
     required: true,
   },
   {
+    // The same check CI's lint job runs, same globs. Without it e536234 passed
+    // every local lane and went red on CI for formatting alone.
+    name: 'prettier (format check, same globs as CI)',
+    cmd: 'pnpm',
+    args: [
+      'exec',
+      'prettier',
+      '--check',
+      '--log-level',
+      'warn',
+      '**/*.{ts,tsx,js,cjs,mjs,json,md}',
+    ],
+    required: true,
+  },
+  {
     name: 'gate tests',
     cmd: 'pnpm',
     args: ['run', 'test'],

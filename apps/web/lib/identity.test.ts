@@ -81,8 +81,11 @@ describe('visual identity', () => {
       const dir = join(APP, 'fonts', face);
       const files = readdirSync(dir).filter((f) => f.endsWith('.woff2'));
       expect(files, `${face} woff2`).not.toHaveLength(0);
-      for (const file of files) expect(layout, `${face}/${file} is loaded`).toContain(`./fonts/${face}/${file}`);
-      expect(readFileSync(join(dir, 'OFL.txt'), 'utf8'), `${face} licence`).toMatch(/SIL Open Font License/);
+      for (const file of files)
+        expect(layout, `${face}/${file} is loaded`).toContain(`./fonts/${face}/${file}`);
+      expect(readFileSync(join(dir, 'OFL.txt'), 'utf8'), `${face} licence`).toMatch(
+        /SIL Open Font License/,
+      );
     }
   });
 

@@ -34,19 +34,25 @@ import './globals.css';
  * download per face.
  */
 const display = localFont({
-  src: [{ path: './fonts/Newsreader/Newsreader-latin-wght.woff2', weight: '200 800', style: 'normal' }],
+  src: [
+    { path: './fonts/Newsreader/Newsreader-latin-wght.woff2', weight: '200 800', style: 'normal' },
+  ],
   display: 'swap',
   variable: '--font-display',
 });
 
 const ui = localFont({
-  src: [{ path: './fonts/Public_Sans/PublicSans-latin-wght.woff2', weight: '100 900', style: 'normal' }],
+  src: [
+    { path: './fonts/Public_Sans/PublicSans-latin-wght.woff2', weight: '100 900', style: 'normal' },
+  ],
   display: 'swap',
   variable: '--font-ui',
 });
 
 const mono = localFont({
-  src: [{ path: './fonts/Roboto_Mono/RobotoMono-latin-wght.woff2', weight: '100 700', style: 'normal' }],
+  src: [
+    { path: './fonts/Roboto_Mono/RobotoMono-latin-wght.woff2', weight: '100 700', style: 'normal' },
+  ],
   display: 'swap',
   variable: '--font-mono',
 });
